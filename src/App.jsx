@@ -112,6 +112,25 @@ const storage = {
   },
 };
 
+// ── Leaflet loader (loads CSS + JS from CDN once) ─────────────────────────────
+let leafletPromise = null;
+function loadLeaflet() {
+  if (leafletPromise) return leafletPromise;
+  leafletPromise = new Promise((resolve, reject) => {
+    if (window.L) { resolve(window.L); return; }
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
+    document.head.appendChild(css);
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
+    script.onload = () => setTimeout(() => resolve(window.L), 100);
+    script.onerror = () => reject(new Error('Failed to load Leaflet'));
+    document.head.appendChild(script);
+  });
+  return leafletPromise;
+}
+
 // ── Canvas map ────────────────────────────────────────────────────────────────
 function centerLat(jobs, myLoc) {
   const lats = [...jobs.map(j => j.lat), myLoc ? myLoc.lat : null].filter(v => v !== null);
@@ -123,319 +142,157 @@ function centerLng(jobs, myLoc) {
 }
 
 function CanvasMap({ jobs, myLocation, currentUser, onJobSelect, height = 400 }) {
-  const canvasRef = useRef(null);
-  const stateRef = useRef({ offsetX: 0, offsetY: 0, zoom: 1, dragging: false, lastX: 0, lastY: 0 });
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markersRef = useRef([]);
+  const userMarkerRef = useRef(null);
+  const [ready, setReady] = useState(false);
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    const s = stateRef.current;
-    const cLat = centerLat(jobs, myLocation);
-    const cLng = centerLng(jobs, myLocation);
-    const scale = 100000 * s.zoom;
-    const cx = w / 2 + s.offsetX;
-    const cy = h / 2 + s.offsetY;
-    const proj = (lat, lng) => ({ x: cx + (lng - cLng) * scale, y: cy - (lat - cLat) * scale });
+  useEffect(() => {
+    let cancelled = false;
+    loadLeaflet().then(L => {
+      if (cancelled || !containerRef.current || mapRef.current) return;
+      const center = jobs.length ? [jobs[0].lat, jobs[0].lng]
+        : myLocation ? [myLocation.lat, myLocation.lng]
+        : [ORCHARDS[0].center.lat, ORCHARDS[0].center.lng];
+      const map = L.map(containerRef.current, { center, zoom: 16, zoomControl: true });
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles © Esri', maxZoom: 19 }
+      ).addTo(map);
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, opacity: 0.6 }
+      ).addTo(map);
+      mapRef.current = map;
+      setReady(true);
+      setTimeout(() => map.invalidateSize(), 200);
+    }).catch(e => console.error('Leaflet load failed', e));
+    return () => {
+      cancelled = true;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+  }, []);
 
-    ctx.fillStyle = '#d1fae5';
-    ctx.fillRect(0, 0, w, h);
-
-    const gridStep = Math.max(0.0001, 0.002 / s.zoom);
-    const startLat = cLat - (h / 2 / scale) - gridStep;
-    const endLat = cLat + (h / 2 / scale) + gridStep;
-    const startLng = cLng - (w / 2 / scale) - gridStep;
-    const endLng = cLng + (w / 2 / scale) + gridStep;
-
-    ctx.strokeStyle = '#a7f3d0';
-    ctx.lineWidth = 1;
-    for (let la = Math.ceil(startLat / gridStep) * gridStep; la <= endLat; la += gridStep) {
-      const p = proj(la, cLng);
-      ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(w, p.y); ctx.stroke();
-    }
-    for (let ln = Math.ceil(startLng / gridStep) * gridStep; ln <= endLng; ln += gridStep) {
-      const p = proj(cLat, ln);
-      ctx.beginPath(); ctx.moveTo(p.x, 0); ctx.lineTo(p.x, h); ctx.stroke();
-    }
-
-    const dotStep = Math.max(0.00005, 0.001 / s.zoom);
-    if (s.zoom > 0.5) {
-      for (let la = Math.ceil(startLat / dotStep) * dotStep; la <= endLat; la += dotStep) {
-        for (let ln = Math.ceil(startLng / dotStep) * dotStep; ln <= endLng; ln += dotStep) {
-          const p = proj(la, ln);
-          const r = Math.max(2, 4 * s.zoom);
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          ctx.fillStyle = '#6ee7b7';
-          ctx.fill();
-        }
-      }
-    }
-
-    ctx.fillStyle = '#065f46';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('N', w - 22, 28);
-
-    if (myLocation) {
-      const p = proj(myLocation.lat, myLocation.lng);
-      ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(59,130,246,0.2)'; ctx.fill();
-      ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = '#3b82f6'; ctx.fill();
-      ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = '#1d4ed8'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('You', p.x, p.y - 12);
-    }
-
+  // Update job markers
+  useEffect(() => {
+    if (!ready || !window.L || !mapRef.current) return;
+    const L = window.L;
+    const map = mapRef.current;
+    markersRef.current.forEach(m => map.removeLayer(m));
+    markersRef.current = [];
     jobs.forEach(job => {
-      const p = proj(job.lat, job.lng);
       const isOpen = job.status === 'open';
       const isMine = job.claimedBy === currentUser?.id;
       const color = isOpen ? '#dc2626' : isMine ? '#2563eb' : '#6b7280';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y - 14, 10, 0, Math.PI * 2);
-      ctx.fillStyle = color; ctx.fill();
-      ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(p.x - 6, p.y - 8);
-      ctx.lineTo(p.x + 6, p.y - 8);
-      ctx.lineTo(p.x, p.y + 2);
-      ctx.closePath();
-      ctx.fillStyle = color; ctx.fill();
-      ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(job.taskIcon, p.x, p.y - 10);
-      ctx.fillStyle = '#111'; ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(job.equipmentName, p.x, p.y + 14);
+      const icon = L.divIcon({
+        className: 'orchard-pin',
+        html: `<div style="position:relative;transform:translate(-50%,-100%)">
+          <svg width="36" height="48" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">
+            <path d="M18 0 C8 0 0 8 0 18 C0 30 18 48 18 48 C18 48 36 30 36 18 C36 8 28 0 18 0 Z" fill="${color}" stroke="white" stroke-width="2"/>
+            <circle cx="18" cy="18" r="7" fill="white"/>
+          </svg>
+          <div style="position:absolute;top:9px;left:50%;transform:translateX(-50%);font-size:14px">${job.taskIcon}</div>
+        </div>`,
+        iconSize: [36, 48], iconAnchor: [18, 48],
+      });
+      const m = L.marker([job.lat, job.lng], { icon }).addTo(map);
+      m.on('click', () => onJobSelect && onJobSelect(job));
+      markersRef.current.push(m);
     });
-
-    ctx.fillStyle = '#6b7280'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
-    ctx.fillText('Scroll to zoom · Drag to pan', w - 8, h - 8);
-  }, [jobs, myLocation, currentUser]);
-
-  useEffect(() => { draw(); }, [draw]);
-
-  const onMouseDown = (e) => {
-    stateRef.current.dragging = true;
-    stateRef.current.lastX = e.clientX;
-    stateRef.current.lastY = e.clientY;
-  };
-  const onMouseMove = (e) => {
-    if (!stateRef.current.dragging) return;
-    stateRef.current.offsetX += e.clientX - stateRef.current.lastX;
-    stateRef.current.offsetY += e.clientY - stateRef.current.lastY;
-    stateRef.current.lastX = e.clientX;
-    stateRef.current.lastY = e.clientY;
-    draw();
-  };
-  const onMouseUp = () => { stateRef.current.dragging = false; };
-
-  const touchRef = useRef(null);
-  const onTouchStart = (e) => {
-    if (e.touches.length === 1) touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  };
-  const onTouchMove = (e) => {
-    if (e.touches.length === 1 && touchRef.current) {
-      stateRef.current.offsetX += e.touches[0].clientX - touchRef.current.x;
-      stateRef.current.offsetY += e.touches[0].clientY - touchRef.current.y;
-      touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      draw();
+    if (jobs.length) {
+      const bounds = L.latLngBounds(jobs.map(j => [j.lat, j.lng]));
+      if (myLocation) bounds.extend([myLocation.lat, myLocation.lng]);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
     }
-  };
+  }, [jobs, ready, currentUser, myLocation]);
 
-  const onWheel = (e) => {
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.15 : 0.87;
-    stateRef.current.zoom = Math.max(0.1, Math.min(50, stateRef.current.zoom * factor));
-    draw();
-  };
-
-  const onClick = (e) => {
-    if (!onJobSelect) return;
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
-    const s = stateRef.current;
-    const cLat = centerLat(jobs, myLocation);
-    const cLng = centerLng(jobs, myLocation);
-    const scale = 100000 * s.zoom;
-    const cx = canvas.width / 2 + s.offsetX;
-    const cy = canvas.height / 2 + s.offsetY;
-    for (const job of jobs) {
-      const px = cx + (job.lng - cLng) * scale;
-      const py = cy - (job.lat - cLat) * scale - 14;
-      if (Math.hypot(mx - px, my - py) < 14) { onJobSelect(job); return; }
-    }
-  };
-
-  const zoom = (dir) => {
-    stateRef.current.zoom = Math.max(0.1, Math.min(50, stateRef.current.zoom * (dir > 0 ? 1.4 : 0.7)));
-    draw();
-  };
+  // Update user location marker
+  useEffect(() => {
+    if (!ready || !window.L || !mapRef.current || !myLocation) return;
+    const L = window.L;
+    const map = mapRef.current;
+    if (userMarkerRef.current) map.removeLayer(userMarkerRef.current);
+    const icon = L.divIcon({
+      className: 'user-pin',
+      html: `<div style="position:relative;transform:translate(-50%,-50%)">
+        <div style="width:30px;height:30px;background:rgba(59,130,246,.3);border-radius:50%;position:absolute;top:-6px;left:-6px"></div>
+        <div style="width:18px;height:18px;background:#3b82f6;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.4);position:relative"></div>
+      </div>`,
+      iconSize: [18, 18], iconAnchor: [9, 9],
+    });
+    userMarkerRef.current = L.marker([myLocation.lat, myLocation.lng], { icon, zIndexOffset: 1000 }).addTo(map);
+  }, [myLocation, ready]);
 
   return (
     <div className="relative rounded-xl overflow-hidden border-2 border-green-400 shadow-md" style={{ height }}>
-      <canvas
-        ref={canvasRef}
-        width={600} height={height}
-        style={{ width: '100%', height: '100%', cursor: 'grab', display: 'block' }}
-        onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
-        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={() => { touchRef.current = null; }}
-        onWheel={onWheel} onClick={onClick}
-      />
-      <div className="absolute top-2 left-2 flex flex-col gap-1">
-        {['+', '−'].map((lbl, i) => (
-          <button key={lbl} onClick={() => zoom(i === 0 ? 1 : -1)}
-            className="w-8 h-8 bg-white rounded shadow font-bold text-gray-700 hover:bg-gray-100 flex items-center justify-center text-lg border border-gray-200">
-            {lbl}
-          </button>
-        ))}
-      </div>
+      <div ref={containerRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
+      {!ready && (
+        <div className="absolute inset-0 flex items-center justify-center bg-green-50 text-green-800 text-sm">
+          Loading satellite map…
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Pin adjuster ──────────────────────────────────────────────────────────────
 function PinAdjuster({ initialLat, initialLng, onChange }) {
-  const canvasRef = useRef(null);
-  const pinRef = useRef({ lat: initialLat, lng: initialLng });
-  const stateRef = useRef({ offsetX: 0, offsetY: 0, zoom: 3, dragging: false, dragPin: false, lastX: 0, lastY: 0 });
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const [ready, setReady] = useState(false);
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    const s = stateRef.current;
-    const scale = 100000 * s.zoom;
-    const cx = w / 2 + s.offsetX, cy = h / 2 + s.offsetY;
-    const cLat = initialLat, cLng = initialLng;
-    const proj = (lat, lng) => ({ x: cx + (lng - cLng) * scale, y: cy - (lat - cLat) * scale });
+  useEffect(() => {
+    let cancelled = false;
+    loadLeaflet().then(L => {
+      if (cancelled || !containerRef.current || mapRef.current) return;
+      const map = L.map(containerRef.current, {
+        center: [initialLat, initialLng], zoom: 18, zoomControl: true,
+      });
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles © Esri', maxZoom: 19 }
+      ).addTo(map);
 
-    ctx.fillStyle = '#d1fae5'; ctx.fillRect(0, 0, w, h);
+      const icon = L.divIcon({
+        className: 'pin-adj',
+        html: `<svg width="32" height="42" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">
+          <path d="M18 0 C8 0 0 8 0 18 C0 30 18 48 18 48 C18 48 36 30 36 18 C36 8 28 0 18 0 Z" fill="#dc2626" stroke="white" stroke-width="2"/>
+          <circle cx="18" cy="18" r="7" fill="white"/>
+        </svg>`,
+        iconSize: [32, 42], iconAnchor: [16, 42],
+      });
+      const marker = L.marker([initialLat, initialLng], { icon, draggable: true }).addTo(map);
+      marker.on('dragend', () => {
+        const p = marker.getLatLng();
+        onChange(p.lat, p.lng);
+      });
+      map.on('click', (e) => {
+        marker.setLatLng(e.latlng);
+        onChange(e.latlng.lat, e.latlng.lng);
+      });
 
-    const gridStep = Math.max(0.00005, 0.001 / s.zoom);
-    const startLat = cLat - h / 2 / scale - gridStep;
-    const endLat = cLat + h / 2 / scale + gridStep;
-    const startLng = cLng - w / 2 / scale - gridStep;
-    const endLng = cLng + w / 2 / scale + gridStep;
-    ctx.strokeStyle = '#a7f3d0'; ctx.lineWidth = 1;
-    for (let la = Math.ceil(startLat / gridStep) * gridStep; la <= endLat; la += gridStep) {
-      const p = proj(la, cLng); ctx.beginPath(); ctx.moveTo(0, p.y); ctx.lineTo(w, p.y); ctx.stroke();
-    }
-    for (let ln = Math.ceil(startLng / gridStep) * gridStep; ln <= endLng; ln += gridStep) {
-      const p = proj(cLat, ln); ctx.beginPath(); ctx.moveTo(p.x, 0); ctx.lineTo(p.x, h); ctx.stroke();
-    }
-    for (let la = Math.ceil(startLat / gridStep) * gridStep; la <= endLat; la += gridStep) {
-      for (let ln = Math.ceil(startLng / gridStep) * gridStep; ln <= endLng; ln += gridStep) {
-        const p = proj(la, ln);
-        ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, 3 * s.zoom / 3), 0, Math.PI * 2);
-        ctx.fillStyle = '#6ee7b7'; ctx.fill();
-      }
-    }
+      markerRef.current = marker;
+      mapRef.current = map;
+      setReady(true);
+      setTimeout(() => map.invalidateSize(), 200);
+    }).catch(e => console.error('Leaflet load failed', e));
 
-    const pp = proj(pinRef.current.lat, pinRef.current.lng);
-    ctx.beginPath(); ctx.arc(pp.x, pp.y - 14, 12, 0, Math.PI * 2);
-    ctx.fillStyle = '#dc2626'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(pp.x - 7, pp.y - 6); ctx.lineTo(pp.x + 7, pp.y - 6); ctx.lineTo(pp.x, pp.y + 4);
-    ctx.closePath(); ctx.fillStyle = '#dc2626'; ctx.fill();
-
-    ctx.fillStyle = '#6b7280'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('Drag pin · scroll to zoom · drag map to pan', w / 2, h - 6);
-  }, [initialLat, initialLng]);
-
-  useEffect(() => { draw(); }, [draw]);
-
-  const getLatLng = (clientX, clientY) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const mx = (clientX - rect.left) * (canvas.width / rect.width);
-    const my = (clientY - rect.top) * (canvas.height / rect.height);
-    const s = stateRef.current;
-    const scale = 100000 * s.zoom;
-    const cx = canvas.width / 2 + s.offsetX, cy = canvas.height / 2 + s.offsetY;
-    return { lat: initialLat + (cy - my) / scale, lng: initialLng + (mx - cx) / scale };
-  };
-
-  const isPinHit = (clientX, clientY) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const mx = (clientX - rect.left) * (canvas.width / rect.width);
-    const my = (clientY - rect.top) * (canvas.height / rect.height);
-    const s = stateRef.current;
-    const scale = 100000 * s.zoom;
-    const cx = canvas.width / 2 + s.offsetX, cy = canvas.height / 2 + s.offsetY;
-    const px = cx + (pinRef.current.lng - initialLng) * scale;
-    const py = cy - (pinRef.current.lat - initialLat) * scale - 14;
-    return Math.hypot(mx - px, my - py) < 18;
-  };
-
-  const onMouseDown = (e) => {
-    stateRef.current.dragging = true;
-    stateRef.current.dragPin = isPinHit(e.clientX, e.clientY);
-    stateRef.current.lastX = e.clientX; stateRef.current.lastY = e.clientY;
-  };
-  const onMouseMove = (e) => {
-    if (!stateRef.current.dragging) return;
-    if (stateRef.current.dragPin) {
-      const ll = getLatLng(e.clientX, e.clientY);
-      pinRef.current = ll; onChange(ll.lat, ll.lng);
-    } else {
-      stateRef.current.offsetX += e.clientX - stateRef.current.lastX;
-      stateRef.current.offsetY += e.clientY - stateRef.current.lastY;
-    }
-    stateRef.current.lastX = e.clientX; stateRef.current.lastY = e.clientY;
-    draw();
-  };
-  const onMouseUp = () => { stateRef.current.dragging = false; stateRef.current.dragPin = false; };
-  const onWheel = (e) => {
-    e.preventDefault();
-    stateRef.current.zoom = Math.max(0.5, Math.min(50, stateRef.current.zoom * (e.deltaY < 0 ? 1.15 : 0.87)));
-    draw();
-  };
-
-  const touchRef = useRef(null);
-  const onTouchStart = (e) => {
-    const t = e.touches[0];
-    touchRef.current = { x: t.clientX, y: t.clientY, dragPin: isPinHit(t.clientX, t.clientY) };
-  };
-  const onTouchMove = (e) => {
-    if (!touchRef.current) return;
-    const t = e.touches[0];
-    if (touchRef.current.dragPin) {
-      const ll = getLatLng(t.clientX, t.clientY);
-      pinRef.current = ll; onChange(ll.lat, ll.lng);
-    } else {
-      stateRef.current.offsetX += t.clientX - touchRef.current.x;
-      stateRef.current.offsetY += t.clientY - touchRef.current.y;
-    }
-    touchRef.current = { ...touchRef.current, x: t.clientX, y: t.clientY };
-    draw();
-  };
-
-  const zoom = (dir) => {
-    stateRef.current.zoom = Math.max(0.5, Math.min(50, stateRef.current.zoom * (dir > 0 ? 1.4 : 0.7)));
-    draw();
-  };
+    return () => {
+      cancelled = true;
+      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    };
+  }, []);
 
   return (
-    <div className="relative rounded-lg overflow-hidden border-2 border-green-400" style={{ height: 200 }}>
-      <canvas
-        ref={canvasRef} width={500} height={200}
-        style={{ width: '100%', height: '100%', display: 'block', cursor: 'crosshair' }}
-        onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
-        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={() => { touchRef.current = null; }}
-        onWheel={onWheel}
-      />
-      <div className="absolute top-2 left-2 flex flex-col gap-1">
-        {['+', '−'].map((lbl, i) => (
-          <button key={lbl} onClick={() => zoom(i === 0 ? 1 : -1)}
-            className="w-7 h-7 bg-white rounded shadow font-bold text-gray-700 hover:bg-gray-100 flex items-center justify-center border border-gray-200">
-            {lbl}
-          </button>
-        ))}
-      </div>
+    <div className="relative rounded-lg overflow-hidden border-2 border-green-400" style={{ height: 220 }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
+      {!ready && (
+        <div className="absolute inset-0 flex items-center justify-center bg-green-50 text-green-800 text-xs">
+          Loading satellite…
+        </div>
+      )}
     </div>
   );
 }
