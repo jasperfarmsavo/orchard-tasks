@@ -285,6 +285,13 @@ function PinAdjuster({ initialLat, initialLng, onChange }) {
     };
   }, []);
 
+  // When initialLat/Lng change (e.g. GPS re-captured), move the pin and recenter the map
+  useEffect(() => {
+    if (!ready || !mapRef.current || !markerRef.current) return;
+    markerRef.current.setLatLng([initialLat, initialLng]);
+    mapRef.current.setView([initialLat, initialLng], mapRef.current.getZoom(), { animate: true });
+  }, [initialLat, initialLng, ready]);
+
   return (
     <div className="relative rounded-lg overflow-hidden border-2 border-green-400" style={{ height: 220 }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%', zIndex: 0 }} />
