@@ -6,7 +6,7 @@ import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firesto
 // ══════════════════════════════════════════════════════════════════════════════
 // ⚠️ CHANGE THESE BEFORE DEPLOYING ⚠️
 // ══════════════════════════════════════════════════════════════════════════════
-const APP_PASSWORD = 'avocado123';
+const APP_PASSWORD = 'orchard2026';
 const ADMIN_OVERRIDE_CODE = 'admin-bypass-2026';
 // ══════════════════════════════════════════════════════════════════════════════
 
