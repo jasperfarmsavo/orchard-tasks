@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MapPin, Truck, Wrench, Clock, User, LogOut, Plus, List, Map as MapIcon, AlertCircle, Navigation, Trash2, Settings, Edit2, Download, Upload, X, Check } from 'lucide-react';
+import { db } from './firebase';
+import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ⚠️ CHANGE THESE BEFORE DEPLOYING ⚠️
 // ══════════════════════════════════════════════════════════════════════════════
-const APP_PASSWORD = 'orchard2026';
+const APP_PASSWORD = 'avocado123';
 const ADMIN_OVERRIDE_CODE = 'admin-bypass-2026';
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -20,11 +22,12 @@ const DEFAULT_USERS = [
 ];
 
 const FULFILLER_SPECIALITIES = ['General', 'Fuel Ute', 'Repair', 'Towing'];
+
 const DEFAULT_EQUIPMENT = [
   { id: 'e1', name: 'Tractor 1', icon: '🚜' },
   { id: 'e2', name: 'Tractor 2', icon: '🚜' },
   { id: 'e3', name: 'Fuel Ute', icon: '⛽' },
-  { id: 'e4', name: 'EWP (Cherry Picker)', icon: '🏗️' },
+  { id: 'e4', name: 'EWP (Cherry Picker)', icon: '🪜' },
   { id: 'e5', name: 'Harvest Trailer 1', icon: '🚛' },
   { id: 'e6', name: 'Harvest Trailer 2', icon: '🚛' },
   { id: 'e7', name: 'Avocado Bin', icon: '🥑' },
@@ -45,40 +48,24 @@ const DEFAULT_TASKS = [
 
 const USER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#14b8a6', '#6366f1', '#d946ef'];
 const EQUIPMENT_ICONS = [
-  // Tractors & farm machinery
   '🚜', '🌾', '🧑‍🌾', '👨‍🌾', '👩‍🌾',
-  // Trucks, utes, vans
   '🛻', '🚛', '🚚', '🚐', '🚗', '🚙',
-  // Small utility vehicles
   '🛺', '🏍️', '🛵', '🚲',
-  // Lifting / aerial / cranes
   '🏗️', '🪜', '🛗', '⬆️', '🧗',
-  // Fuel, liquids, spraying
   '⛽', '💧', '💦', '💨', '🛢️',
-  // Bins, containers, boxes
   '🥑', '📦', '🪣', '🧺', '🗑️', '🛒',
-  // Tools & repair
   '🔧', '🛠️', '🪚', '🪓', '⛏️', '🔨', '🪛', '🧰',
-  // Power & parts
   '🔋', '⚡', '🧯', '⚙️', '🔩', '🛞',
-  // Aviation / other
   '🚁', '🛩️', '🚤'
 ];
 const TASK_ICONS = [
-  // Common tasks
   '⛽', '🪝', '🔧', '🛠️', '🛞', '🔋',
-  // Warnings & alerts
   '⚠️', '🚨', '🆘', '❌', '🛑', '🔔',
-  // Physical states
   '🔥', '💧', '💦', '❄️', '💨', '⚡',
-  // Mechanical
   '🔩', '⚙️', '🧰', '🪛', '🔨', '🪚',
-  // Communication / admin
   '📞', '📸', '📋', '✅', '✏️', '📝',
-  // Time / scheduling
   '⏰', '🕐', '⏳',
-  // Other
-  '💡', '🧹', '♻️', '🔔', '🗑️'
+  '💡', '🧹', '♻️', '🗑️'
 ];
 
 // ── Orchard locations for geofencing + tile caching ───────────────────────────
@@ -100,11 +87,9 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
-
 function isNearAnyOrchard(lat, lng) {
   return ORCHARDS.some(o => distanceKm(lat, lng, o.center.lat, o.center.lng) <= GEOFENCE_RADIUS_KM);
 }
-
 function getTilesForBounds(bounds, zoom) {
   const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
   const lng2tile = (lng, z) => Math.floor((lng + 180) / 360 * Math.pow(2, z));
@@ -116,7 +101,6 @@ function getTilesForBounds(bounds, zoom) {
       tiles.push({ x, y, z: zoom });
   return tiles;
 }
-
 function getAllOrchardTiles() {
   const all = [];
   for (const orchard of ORCHARDS)
@@ -124,7 +108,6 @@ function getAllOrchardTiles() {
       all.push(...getTilesForBounds(orchard.bounds, z));
   return all;
 }
-
 async function precacheTiles(onProgress) {
   if (!('caches' in window)) return { cached: 0, total: 0, skipped: true };
   const tiles = getAllOrchardTiles();
@@ -147,7 +130,52 @@ async function precacheTiles(onProgress) {
   return { cached, total: tiles.length };
 }
 
-// ── Confirmation dialog component (replaces window.confirm which can fail on mobile) ──
+// ── Notification helpers ──────────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission !== 'denied') {
+    const result = await Notification.requestPermission();
+    return result === 'granted';
+  }
+  return false;
+}
+function playNotificationSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContext();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.3, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    o.start();
+    o.stop(ctx.currentTime + 0.3);
+    setTimeout(() => {
+      const o2 = ctx.createOscillator();
+      const g2 = ctx.createGain();
+      o2.connect(g2); g2.connect(ctx.destination);
+      o2.frequency.value = 1100;
+      g2.gain.setValueAtTime(0.3, ctx.currentTime);
+      g2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      o2.start();
+      o2.stop(ctx.currentTime + 0.3);
+    }, 180);
+  } catch {}
+}
+function vibrate() {
+  try { navigator.vibrate?.([100, 50, 100]); } catch {}
+}
+function showBrowserNotification(title, body) {
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body, icon: '/favicon.svg', tag: 'orchard-task' });
+    }
+  } catch {}
+}
+
+// ── Confirmation dialog ───────────────────────────────────────────────────────
 function ConfirmDialog({ message, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4">
@@ -162,74 +190,31 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
   );
 }
 
-// ── Notification helpers ──────────────────────────────────────────────────────
-async function requestNotificationPermission() {
-  if (!('Notification' in window)) return false;
-  if (Notification.permission === 'granted') return true;
-  if (Notification.permission !== 'denied') {
-    const result = await Notification.requestPermission();
-    return result === 'granted';
-  }
-  return false;
+// ── Firestore helpers ─────────────────────────────────────────────────────────
+async function firestoreSaveJob(job) {
+  await setDoc(doc(db, 'jobs', job.id), job);
+}
+async function firestoreDeleteJob(id) {
+  await deleteDoc(doc(db, 'jobs', id));
+}
+async function firestoreSaveItem(collName, item) {
+  await setDoc(doc(db, collName, item.id), item);
+}
+async function firestoreDeleteItem(collName, id) {
+  await deleteDoc(doc(db, collName, id));
+}
+async function firestoreSaveList(collName, items) {
+  for (const item of items) await setDoc(doc(db, collName, item.id), item);
+}
+function subscribeCollection(name, callback) {
+  return onSnapshot(collection(db, name), (snap) => {
+    const items = [];
+    snap.forEach(d => items.push({ id: d.id, ...d.data() }));
+    callback(items);
+  });
 }
 
-function playNotificationSound() {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioContext();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination);
-    o.frequency.value = 880;
-    g.gain.setValueAtTime(0.3, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-    o.start();
-    o.stop(ctx.currentTime + 0.3);
-    // Second beep for emphasis
-    setTimeout(() => {
-      const o2 = ctx.createOscillator();
-      const g2 = ctx.createGain();
-      o2.connect(g2); g2.connect(ctx.destination);
-      o2.frequency.value = 1100;
-      g2.gain.setValueAtTime(0.3, ctx.currentTime);
-      g2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-      o2.start();
-      o2.stop(ctx.currentTime + 0.3);
-    }, 180);
-  } catch {}
-}
-
-function vibrate() {
-  try { navigator.vibrate?.([100, 50, 100]); } catch {}
-}
-
-function showBrowserNotification(title, body) {
-  try {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, {
-        body,
-        icon: '/favicon.svg',
-        tag: 'orchard-task',
-        requireInteraction: false,
-      });
-    }
-  } catch {}
-}
-
-// ── Local storage helpers ─────────────────────────────────────────────────────
-const storage = {
-  get: async (key) => {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? { value: v } : null;
-    } catch { return null; }
-  },
-  set: async (key, value) => {
-    try { localStorage.setItem(key, value); } catch {}
-  },
-};
-
-// ── Leaflet loader (loads CSS + JS from CDN once) ─────────────────────────────
+// ── Leaflet loader ────────────────────────────────────────────────────────────
 let leafletPromise = null;
 function loadLeaflet() {
   if (leafletPromise) return leafletPromise;
@@ -248,16 +233,7 @@ function loadLeaflet() {
   return leafletPromise;
 }
 
-// ── Canvas map ────────────────────────────────────────────────────────────────
-function centerLat(jobs, myLoc) {
-  const lats = [...jobs.map(j => j.lat), myLoc ? myLoc.lat : null].filter(v => v !== null);
-  return lats.length ? lats.reduce((a, b) => a + b) / lats.length : -33.64;
-}
-function centerLng(jobs, myLoc) {
-  const lngs = [...jobs.map(j => j.lng), myLoc ? myLoc.lng : null].filter(v => v !== null);
-  return lngs.length ? lngs.reduce((a, b) => a + b) / lngs.length : 115.45;
-}
-
+// ── Leaflet Map with task pins ────────────────────────────────────────────────
 function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height = 400 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -265,7 +241,6 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
   const userMarkerRef = useRef(null);
   const [ready, setReady] = useState(false);
 
-  // Expose claim/complete to popup button onclick handlers
   useEffect(() => {
     window.__orchardClaim = (id) => onClaim && onClaim(id);
     window.__orchardComplete = (id) => onComplete && onComplete(id);
@@ -283,14 +258,10 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
         : myLocation ? [myLocation.lat, myLocation.lng]
         : [ORCHARDS[0].center.lat, ORCHARDS[0].center.lng];
       const map = L.map(containerRef.current, { center, zoom: 16, zoomControl: true });
-      L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { attribution: 'Tiles © Esri', maxZoom: 19 }
-      ).addTo(map);
-      L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19, opacity: 0.6 }
-      ).addTo(map);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles © Esri', maxZoom: 19 }).addTo(map);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, opacity: 0.6 }).addTo(map);
       mapRef.current = map;
       setReady(true);
       setTimeout(() => map.invalidateSize(), 200);
@@ -301,7 +272,6 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
     };
   }, []);
 
-  // Update job markers
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current) return;
     const L = window.L;
@@ -325,13 +295,12 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
       });
       const m = L.marker([job.lat, job.lng], { icon }).addTo(map);
 
-      // Build the tooltip HTML with task details
       const statusText = job.status === 'open' ? '🆕 Open'
         : job.status === 'claimed' ? `👷 Claimed by ${job.claimedByName || 'someone'}`
         : '✅ Completed';
       const mins = Math.floor((Date.now() - job.createdAt) / 60000);
       const timeAgo = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins/60)}h ago`;
-      const noteHtml = job.note ? `<div style="font-style:italic;color:#6b7280;margin-top:6px;font-size:12px">"${job.note.replace(/"/g, '&quot;')}"</div>` : '';
+      const noteHtml = job.note ? `<div style="font-style:italic;color:#6b7280;margin-top:6px;font-size:12px">"${String(job.note).replace(/"/g, '&quot;')}"</div>` : '';
       const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${job.lat},${job.lng}`;
       const popupHtml = `
         <div style="min-width:200px;padding:4px">
@@ -362,7 +331,6 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
     }
   }, [jobs, ready, currentUser, myLocation]);
 
-  // Update user location marker
   useEffect(() => {
     if (!ready || !window.L || !mapRef.current || !myLocation) return;
     const L = window.L;
@@ -391,7 +359,7 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
   );
 }
 
-// ── Pin adjuster ──────────────────────────────────────────────────────────────
+// ── Pin adjuster for new task ─────────────────────────────────────────────────
 function PinAdjuster({ initialLat, initialLng, onChange }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -402,14 +370,9 @@ function PinAdjuster({ initialLat, initialLng, onChange }) {
     let cancelled = false;
     loadLeaflet().then(L => {
       if (cancelled || !containerRef.current || mapRef.current) return;
-      const map = L.map(containerRef.current, {
-        center: [initialLat, initialLng], zoom: 18, zoomControl: true,
-      });
-      L.tileLayer(
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { attribution: 'Tiles © Esri', maxZoom: 19 }
-      ).addTo(map);
-
+      const map = L.map(containerRef.current, { center: [initialLat, initialLng], zoom: 18, zoomControl: true });
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: 'Tiles © Esri', maxZoom: 19 }).addTo(map);
       const icon = L.divIcon({
         className: 'pin-adj',
         html: `<svg width="32" height="42" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">
@@ -427,20 +390,17 @@ function PinAdjuster({ initialLat, initialLng, onChange }) {
         marker.setLatLng(e.latlng);
         onChange(e.latlng.lat, e.latlng.lng);
       });
-
       markerRef.current = marker;
       mapRef.current = map;
       setReady(true);
       setTimeout(() => map.invalidateSize(), 200);
     }).catch(e => console.error('Leaflet load failed', e));
-
     return () => {
       cancelled = true;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
   }, []);
 
-  // When initialLat/Lng change (e.g. GPS re-captured), move the pin and recenter the map
   useEffect(() => {
     if (!ready || !mapRef.current || !markerRef.current) return;
     markerRef.current.setLatLng([initialLat, initialLng]);
@@ -486,39 +446,85 @@ export default function OrchardApp() {
     setAuthChecking(false);
   }, []);
 
-  // Load dimension tables from localStorage (fall back to defaults)
+  // Subscribe to dimension tables (real-time from Firestore)
   useEffect(() => {
-    (async () => {
-      try {
-        const u = await storage.get('orchard-users');
-        if (u?.value) setUsers(JSON.parse(u.value));
-        const e = await storage.get('orchard-equipment');
-        if (e?.value) setEquipment(JSON.parse(e.value));
-        const t = await storage.get('orchard-tasks');
-        if (t?.value) setTaskTypes(JSON.parse(t.value));
-      } catch {}
-    })();
+    const unsubUsers = subscribeCollection('users', (items) => {
+      if (items.length === 0) firestoreSaveList('users', DEFAULT_USERS);
+      else setUsers(items);
+    });
+    const unsubEquip = subscribeCollection('equipment', (items) => {
+      if (items.length === 0) firestoreSaveList('equipment', DEFAULT_EQUIPMENT);
+      else setEquipment(items);
+    });
+    const unsubTasks = subscribeCollection('tasks', (items) => {
+      if (items.length === 0) firestoreSaveList('tasks', DEFAULT_TASKS);
+      else setTaskTypes(items);
+    });
+    return () => { unsubUsers(); unsubEquip(); unsubTasks(); };
   }, []);
 
+  // Subscribe to jobs (real-time) and trigger notifications on changes
+  const prevJobsRef = useRef([]);
+  const currentUserRef = useRef(null);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+
   useEffect(() => {
-    loadJobs();
-    const interval = setInterval(loadJobs, 5000);
-    return () => clearInterval(interval);
+    const unsub = subscribeCollection('jobs', (newJobs) => {
+      const cu = currentUserRef.current;
+      if (cu && prevJobsRef.current.length > 0) {
+        const prevIds = new Set(prevJobsRef.current.map(j => j.id));
+        const prevById = Object.fromEntries(prevJobsRef.current.map(j => [j.id, j]));
+
+        if (cu.role === 'fulfiller') {
+          const newOpen = newJobs.filter(j => j.status === 'open' && !prevIds.has(j.id));
+          newOpen.forEach(j => {
+            playNotificationSound();
+            vibrate();
+            showBrowserNotification('🆕 New task', `${j.taskIcon} ${j.taskName} · ${j.equipmentName}`);
+            setNotification({ msg: `🆕 New task: ${j.taskName} (${j.equipmentName})`, type: 'info' });
+            setTimeout(() => setNotification(null), 5000);
+          });
+        }
+
+        if (cu.role === 'requester') {
+          newJobs.forEach(j => {
+            const prev = prevById[j.id];
+            if (prev && prev.status !== 'completed' && j.status === 'completed' && j.requesterId === cu.id) {
+              playNotificationSound();
+              vibrate();
+              showBrowserNotification('✅ Task completed', `${j.taskIcon} ${j.taskName} done by ${j.claimedByName || 'a fulfiller'}`);
+              setNotification({ msg: `✅ Your task "${j.taskName}" has been completed!`, type: 'success' });
+              setTimeout(() => setNotification(null), 5000);
+            }
+          });
+        }
+      }
+      prevJobsRef.current = newJobs;
+      setJobs(newJobs);
+      setLoading(false);
+    });
+    return () => unsub();
   }, []);
 
+  // Ask for notification permission
+  useEffect(() => {
+    if (authed) requestNotificationPermission();
+  }, [authed]);
+
+  // Tile pre-cache
   useEffect(() => {
     if (!authed) return;
     const runCache = async () => {
       try {
-        const stored = await storage.get('tile-cache-done');
-        if (stored?.value === TILE_CACHE_NAME) return;
+        const stored = localStorage.getItem('tile-cache-done');
+        if (stored === TILE_CACHE_NAME) return;
       } catch {}
       setCacheStatus('downloading');
       const result = await precacheTiles((done, total) => setCacheProgress({ done, total }));
       if (result.skipped) setCacheStatus('skipped');
       else {
         setCacheStatus('done');
-        try { await storage.set('tile-cache-done', TILE_CACHE_NAME); } catch {}
+        try { localStorage.setItem('tile-cache-done', TILE_CACHE_NAME); } catch {}
         setTimeout(() => setCacheStatus(null), 4000);
       }
     };
@@ -537,98 +543,66 @@ export default function OrchardApp() {
     }
   }, []);
 
-  // Ask for notification permission on first authed load
-  useEffect(() => {
-    if (authed) requestNotificationPermission();
-  }, [authed]);
-
-  const prevJobsRef = useRef([]);
-  const loadJobs = async () => {
-    try {
-      const r = await storage.get('orchard-jobs');
-      const newJobs = r?.value ? JSON.parse(r.value) : [];
-
-      // Detect events vs. previous state and notify the current user if relevant
-      if (currentUser && prevJobsRef.current.length > 0) {
-        const prevIds = new Set(prevJobsRef.current.map(j => j.id));
-        const prevById = Object.fromEntries(prevJobsRef.current.map(j => [j.id, j]));
-
-        // Fulfiller: new OPEN task appeared
-        if (currentUser.role === 'fulfiller') {
-          const newOpen = newJobs.filter(j => j.status === 'open' && !prevIds.has(j.id));
-          newOpen.forEach(j => {
-            playNotificationSound();
-            vibrate();
-            showBrowserNotification('🆕 New task', `${j.taskIcon} ${j.taskName} · ${j.equipmentName}`);
-            setNotification({ msg: `🆕 New task: ${j.taskName} (${j.equipmentName})`, type: 'info' });
-            setTimeout(() => setNotification(null), 5000);
-          });
-        }
-
-        // Requester: my task was marked completed
-        if (currentUser.role === 'requester') {
-          newJobs.forEach(j => {
-            const prev = prevById[j.id];
-            if (prev && prev.status !== 'completed' && j.status === 'completed' && j.requesterId === currentUser.id) {
-              playNotificationSound();
-              vibrate();
-              showBrowserNotification('✅ Task completed', `${j.taskIcon} ${j.taskName} done by ${j.claimedByName || 'a fulfiller'}`);
-              setNotification({ msg: `✅ Your task "${j.taskName}" has been completed!`, type: 'success' });
-              setTimeout(() => setNotification(null), 5000);
-            }
-          });
-        }
-      }
-
-      prevJobsRef.current = newJobs;
-      setJobs(newJobs);
-    } catch { setJobs([]); }
-    setLoading(false);
-  };
-
-  const saveJobs = async (updated) => {
-    await storage.set('orchard-jobs', JSON.stringify(updated));
-    setJobs(updated);
-  };
-
-  const saveUsers = async (updated) => {
-    await storage.set('orchard-users', JSON.stringify(updated));
-    setUsers(updated);
-  };
-  const saveEquipment = async (updated) => {
-    await storage.set('orchard-equipment', JSON.stringify(updated));
-    setEquipment(updated);
-  };
-  const saveTaskTypes = async (updated) => {
-    await storage.set('orchard-tasks', JSON.stringify(updated));
-    setTaskTypes(updated);
-  };
-
   const showNotif = (msg, type = 'success') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
   };
 
+  // ── Firestore-based save functions ────────────────────────────────────────
+  const saveJobs = async (updated) => {
+    const currentIds = new Set(jobs.map(j => j.id));
+    const updatedIds = new Set(updated.map(j => j.id));
+    for (const j of updated) await firestoreSaveJob(j);
+    for (const id of currentIds) if (!updatedIds.has(id)) await firestoreDeleteJob(id);
+  };
+  const saveUsers = async (updated) => {
+    const currentIds = new Set(users.map(u => u.id));
+    const updatedIds = new Set(updated.map(u => u.id));
+    for (const u of updated) await firestoreSaveItem('users', u);
+    for (const id of currentIds) if (!updatedIds.has(id)) await firestoreDeleteItem('users', id);
+  };
+  const saveEquipment = async (updated) => {
+    const currentIds = new Set(equipment.map(e => e.id));
+    const updatedIds = new Set(updated.map(e => e.id));
+    for (const e of updated) await firestoreSaveItem('equipment', e);
+    for (const id of currentIds) if (!updatedIds.has(id)) await firestoreDeleteItem('equipment', id);
+  };
+  const saveTaskTypes = async (updated) => {
+    const currentIds = new Set(taskTypes.map(t => t.id));
+    const updatedIds = new Set(updated.map(t => t.id));
+    for (const t of updated) await firestoreSaveItem('tasks', t);
+    for (const id of currentIds) if (!updatedIds.has(id)) await firestoreDeleteItem('tasks', id);
+  };
+
   const handleCreateJob = async (job) => {
     const newJob = { id: `job_${Date.now()}`, ...job, requesterId: currentUser.id, requesterName: currentUser.name, requesterColor: currentUser.color, status: 'open', createdAt: Date.now(), claimedBy: null, claimedByName: null, completedAt: null };
-    await saveJobs([newJob, ...jobs]);
+    await firestoreSaveJob(newJob);
     setShowNewJob(false);
     showNotif('Task submitted!');
   };
 
   const handleClaim = async (jobId) => {
-    await saveJobs(jobs.map(j => j.id === jobId ? { ...j, status: 'claimed', claimedBy: currentUser.id, claimedByName: currentUser.name, claimedColor: currentUser.color, claimedAt: Date.now() } : j));
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) return;
+    await firestoreSaveJob({ ...job, status: 'claimed', claimedBy: currentUser.id, claimedByName: currentUser.name, claimedColor: currentUser.color, claimedAt: Date.now() });
     showNotif('Task claimed');
   };
 
   const handleComplete = async (jobId) => {
-    await saveJobs(jobs.map(j => j.id === jobId ? { ...j, status: 'completed', completedAt: Date.now() } : j));
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) return;
+    await firestoreSaveJob({ ...job, status: 'completed', completedAt: Date.now() });
     showNotif('Task completed ✓');
   };
 
-  const handleDelete = async (jobId) => {
-    if (!window.confirm('Delete this task?')) return;
-    await saveJobs(jobs.filter(j => j.id !== jobId));
+  const [confirmDelJob, setConfirmDelJob] = useState(null);
+  const handleDelete = (jobId) => {
+    const job = jobs.find(j => j.id === jobId);
+    setConfirmDelJob(job);
+  };
+  const doDeleteJob = async () => {
+    if (confirmDelJob) await firestoreDeleteJob(confirmDelJob.id);
+    setConfirmDelJob(null);
   };
 
   if (authChecking || loading) return <div className="flex items-center justify-center h-screen bg-green-50"><div className="text-green-800">Loading…</div></div>;
@@ -652,8 +626,8 @@ export default function OrchardApp() {
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={() => setShowAdmin(true)} className="p-2 hover:bg-green-700 rounded-full" title="Admin settings"><Settings size={20} /></button>
-            <button onClick={() => setCurrentUser(null)} className="p-2 hover:bg-green-700 rounded-full" title="Switch user"><LogOut size={20} /></button>
+            <button onClick={() => setShowAdmin(true)} className="p-2 hover:bg-green-700 rounded-full"><Settings size={20} /></button>
+            <button onClick={() => setCurrentUser(null)} className="p-2 hover:bg-green-700 rounded-full"><LogOut size={20} /></button>
           </div>
         </div>
       </div>
@@ -668,7 +642,7 @@ export default function OrchardApp() {
                 style={{ width: cacheProgress.total ? `${(cacheProgress.done / cacheProgress.total) * 100}%` : '0%' }} />
             </div>
             <div className="text-blue-200 text-xs mt-0.5">
-              {cacheProgress.done} / {cacheProgress.total} tiles — Jasper · Ruabon · Capel
+              {cacheProgress.done} / {cacheProgress.total} tiles
             </div>
           </div>
           <button onClick={() => setCacheStatus(null)} className="text-white underline text-xs">Skip</button>
@@ -676,7 +650,7 @@ export default function OrchardApp() {
       )}
       {cacheStatus === 'done' && (
         <div className="bg-green-600 text-white px-4 py-2 text-sm flex items-center gap-2">
-          <span>✅</span> Satellite map ready offline — all 3 orchards cached
+          <span>✅</span> Satellite map ready offline
         </div>
       )}
 
@@ -709,6 +683,14 @@ export default function OrchardApp() {
           equipment={equipment} taskTypes={taskTypes}
           onSubmit={handleCreateJob} onCancel={() => setShowNewJob(false)}
           myLocation={myLocation}
+        />
+      )}
+
+      {confirmDelJob && (
+        <ConfirmDialog
+          message={`Delete task "${confirmDelJob.taskName}"?`}
+          onConfirm={doDeleteJob}
+          onCancel={() => setConfirmDelJob(null)}
         />
       )}
     </div>
@@ -854,10 +836,9 @@ function AdminScreen({ users, equipment, taskTypes, saveUsers, saveEquipment, sa
     );
   }
 
-  // CSV helpers
   const toCSV = (rows, cols) => {
     const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
+    return [cols.join(','), ...rows.map(r => cols.map(c => esc(Array.isArray(r[c]) ? r[c].join('|') : r[c])).join(','))].join('\n');
   };
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim());
@@ -893,9 +874,9 @@ function AdminScreen({ users, equipment, taskTypes, saveUsers, saveEquipment, sa
   };
 
   const exportAll = () => {
-    download('orchard-users.csv', toCSV(users, ['id', 'name', 'role', 'color']));
-    setTimeout(() => download('orchard-equipment.csv', toCSV(equipment, ['id', 'name', 'icon'])), 200);
-    setTimeout(() => download('orchard-tasks.csv', toCSV(taskTypes, ['id', 'name', 'icon'])), 400);
+    download('harvestpulse-users.csv', toCSV(users, ['id', 'name', 'role', 'color', 'specialities']));
+    setTimeout(() => download('harvestpulse-equipment.csv', toCSV(equipment, ['id', 'name', 'icon'])), 200);
+    setTimeout(() => download('harvestpulse-tasks.csv', toCSV(taskTypes, ['id', 'name', 'icon'])), 400);
     showNotif('3 CSV files downloaded');
   };
 
@@ -906,12 +887,16 @@ function AdminScreen({ users, equipment, taskTypes, saveUsers, saveEquipment, sa
     const rows = parseCSV(text);
     if (!rows.length) { showNotif('Empty or invalid CSV', 'error'); return; }
     const first = rows[0];
-    // Decide which table based on columns present
     if ('role' in first) {
-      await saveUsers(rows.map((r, i) => ({ id: r.id || `u${Date.now()}_${i}`, name: r.name, role: r.role || 'requester', color: r.color || USER_COLORS[i % USER_COLORS.length] })));
+      await saveUsers(rows.map((r, i) => ({
+        id: r.id || `u${Date.now()}_${i}`,
+        name: r.name,
+        role: r.role || 'requester',
+        color: r.color || USER_COLORS[i % USER_COLORS.length],
+        specialities: r.specialities ? r.specialities.split('|').filter(Boolean) : undefined
+      })));
       showNotif(`Imported ${rows.length} users`);
     } else if ('icon' in first) {
-      // Could be equipment or tasks — ask user? For now detect by name of currently selected tab
       if (tab === 'equipment') {
         await saveEquipment(rows.map((r, i) => ({ id: r.id || `e${Date.now()}_${i}`, name: r.name, icon: r.icon || '🔧' })));
         showNotif(`Imported ${rows.length} equipment items`);
@@ -1213,7 +1198,7 @@ function JobSection({ title, jobs, onDelete, showDelete }) {
                   <span className="text-xl">{job.taskIcon}</span>
                   <span className="font-semibold">{job.taskName}</span>
                 </div>
-                <div className="text-sm text-gray-600">{job.equipmentName}</div>
+                <div className="text-sm text-gray-600">{job.equipmentIcon} {job.equipmentName}</div>
                 {job.note && <div className="text-sm text-gray-500 italic mt-1">"{job.note}"</div>}
                 <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                   <Clock size={12} /> {formatTime(job.createdAt)}
@@ -1235,7 +1220,6 @@ function JobSection({ title, jobs, onDelete, showDelete }) {
 }
 
 function FulfillerView({ activeJobs, completedJobs, openJobs, view, setView, onClaim, onComplete, showHistory, setShowHistory, currentUser, myLocation }) {
-  const [selectedJob, setSelectedJob] = useState(null);
   const myClaimedJobs = activeJobs.filter(j => j.status === 'claimed' && j.claimedBy === currentUser.id);
   const othersClaimedJobs = activeJobs.filter(j => j.status === 'claimed' && j.claimedBy !== currentUser.id);
 
@@ -1278,39 +1262,6 @@ function FulfillerView({ activeJobs, completedJobs, openJobs, view, setView, onC
           {activeJobs.length === 0 && <div className="text-center text-sm text-gray-500 mt-2">No active tasks on map</div>}
         </div>
       )}
-
-      {selectedJob && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end justify-center p-4" onClick={() => setSelectedJob(null)}>
-          <div className="bg-white rounded-xl p-5 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="flex items-start gap-3 mb-3">
-              <span className="text-3xl">{selectedJob.taskIcon}</span>
-              <div>
-                <div className="font-bold text-lg">{selectedJob.taskName}</div>
-                <div className="text-gray-700">{selectedJob.equipmentName}</div>
-                <div className="text-sm text-gray-500">by {selectedJob.requesterName}</div>
-                {selectedJob.claimedByName && <div className="text-sm text-blue-600">Claimed by {selectedJob.claimedByName}</div>}
-              </div>
-            </div>
-            {selectedJob.note && <div className="text-sm italic text-gray-600 mb-3">"{selectedJob.note}"</div>}
-            <div className="bg-gray-50 rounded p-2 text-xs mb-3 flex items-center gap-2">
-              <MapPin size={12} className="text-red-600" />{selectedJob.lat.toFixed(5)}, {selectedJob.lng.toFixed(5)}
-            </div>
-            <div className="flex gap-2">
-              <a href={`https://www.google.com/maps/dir/?api=1&destination=${selectedJob.lat},${selectedJob.lng}`} target="_blank" rel="noopener noreferrer"
-                className="flex-1 bg-gray-200 text-gray-800 font-semibold py-2 rounded-lg text-center flex items-center justify-center gap-1">
-                <Navigation size={16} /> Navigate
-              </a>
-              {selectedJob.status === 'open' && (
-                <button onClick={() => { onClaim(selectedJob.id); setSelectedJob(null); }} className="flex-1 bg-green-600 text-white font-semibold py-2 rounded-lg">Claim</button>
-              )}
-              {selectedJob.status === 'claimed' && selectedJob.claimedBy === currentUser.id && (
-                <button onClick={() => { onComplete(selectedJob.id); setSelectedJob(null); }} className="flex-1 bg-blue-600 text-white font-semibold py-2 rounded-lg">Complete</button>
-              )}
-            </div>
-            <button onClick={() => setSelectedJob(null)} className="w-full text-gray-500 text-sm mt-2 py-1">Close</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1327,7 +1278,7 @@ function ActionableSection({ title, jobs, actionLabel, onAction, color }) {
               <span className="text-2xl">{job.taskIcon}</span>
               <div className="flex-1">
                 <div className="font-bold">{job.taskName}</div>
-                <div className="text-sm text-gray-700">{job.equipmentName}</div>
+                <div className="text-sm text-gray-700">{job.equipmentIcon} {job.equipmentName}</div>
                 <div className="text-xs text-gray-500">Requested by {job.requesterName}</div>
                 {job.note && <div className="text-sm italic text-gray-600 mt-1">"{job.note}"</div>}
                 <div className="text-xs text-gray-400 mt-1 flex items-center gap-1"><Clock size={12} />{formatTime(job.createdAt)}</div>
@@ -1380,7 +1331,7 @@ function NewJobModal({ equipment, taskTypes, onSubmit, onCancel, myLocation }) {
                 {equipment.map(e => (
                   <button key={e.id} onClick={() => { setSel(s => ({ ...s, equipment: e })); setStep(2); }}
                     className="p-4 border-2 border-gray-200 hover:border-green-600 hover:bg-green-50 rounded-lg text-left">
-                    <Truck size={20} className="text-green-700 mb-1" />{e.name}
+                    <div className="text-2xl mb-1">{e.icon || '🔧'}</div>{e.name}
                   </button>
                 ))}
               </div>
@@ -1388,7 +1339,7 @@ function NewJobModal({ equipment, taskTypes, onSubmit, onCancel, myLocation }) {
           )}
           {step === 2 && (
             <div>
-              <div className="bg-green-50 rounded p-2 text-sm mb-3"><strong>{sel.equipment?.name}</strong></div>
+              <div className="bg-green-50 rounded p-2 text-sm mb-3">{sel.equipment?.icon} <strong>{sel.equipment?.name}</strong></div>
               <h3 className="font-semibold mb-3">What's needed?</h3>
               <div className="grid grid-cols-2 gap-2">
                 {taskTypes.map(t => (
@@ -1403,7 +1354,7 @@ function NewJobModal({ equipment, taskTypes, onSubmit, onCancel, myLocation }) {
           )}
           {step === 3 && (
             <div>
-              <div className="bg-green-50 rounded p-2 text-sm mb-3"><strong>{sel.equipment?.name}</strong> · {sel.task?.name}</div>
+              <div className="bg-green-50 rounded p-2 text-sm mb-3">{sel.equipment?.icon} <strong>{sel.equipment?.name}</strong> · {sel.task?.icon} {sel.task?.name}</div>
               <h3 className="font-semibold mb-2">Location</h3>
               {gpsStatus === 'fallback' && (
                 <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 mb-2">GPS unavailable — using demo location. Adjust pin on map.</div>
@@ -1427,13 +1378,13 @@ function NewJobModal({ equipment, taskTypes, onSubmit, onCancel, myLocation }) {
                 placeholder="e.g. Near the eastern fence, won't start…"
                 className="w-full border border-gray-300 rounded-lg p-3 text-sm h-24 focus:outline-none focus:border-green-600" />
               <div className="bg-gray-50 rounded p-3 mt-3 text-sm space-y-1">
-                <div>📦 <strong>{sel.equipment?.name}</strong></div>
+                <div>{sel.equipment?.icon} <strong>{sel.equipment?.name}</strong></div>
                 <div>{sel.task?.icon} <strong>{sel.task?.name}</strong></div>
                 <div>📍 {finalLoc.lat.toFixed(5)}, {finalLoc.lng.toFixed(5)}</div>
               </div>
               <div className="flex gap-2 mt-4">
                 <button onClick={() => setStep(3)} className="flex-1 py-2 border border-gray-300 rounded-lg text-gray-700">Back</button>
-                <button onClick={() => onSubmit({ equipmentId: sel.equipment.id, equipmentName: sel.equipment.name, taskId: sel.task.id, taskName: sel.task.name, taskIcon: sel.task.icon, lat: finalLoc.lat, lng: finalLoc.lng, note })}
+                <button onClick={() => onSubmit({ equipmentId: sel.equipment.id, equipmentName: sel.equipment.name, equipmentIcon: sel.equipment.icon, taskId: sel.task.id, taskName: sel.task.name, taskIcon: sel.task.icon, lat: finalLoc.lat, lng: finalLoc.lng, note })}
                   className="flex-1 py-3 bg-green-700 text-white rounded-lg font-bold">Submit Task</button>
               </div>
             </div>
