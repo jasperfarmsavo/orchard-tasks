@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Truck, Wrench, Clock, User, LogOut, Plus, List, Map as MapIcon, AlertCircle, Navigation, Trash2 } from 'lucide-react';
+import { MapPin, Truck, Wrench, Clock, User, LogOut, Plus, List, Map as MapIcon, AlertCircle, Navigation, Trash2, Settings, Edit2, Download, Upload, X, Check } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ⚠️ CHANGE THESE BEFORE DEPLOYING ⚠️
@@ -11,18 +11,28 @@ const ADMIN_OVERRIDE_CODE = 'admin-bypass-2026';
 const GEOFENCE_RADIUS_KM = 5;
 
 const DEFAULT_USERS = [
-  { id: 'u1', name: 'Alice Johnson', role: 'requester' },
-  { id: 'u2', name: 'Bob Smith', role: 'requester' },
-  { id: 'u3', name: 'Charlie Brown', role: 'requester' },
-  { id: 'u4', name: 'Dana White', role: 'fulfiller' },
-  { id: 'u5', name: 'Evan Lee', role: 'fulfiller' },
-  { id: 'u6', name: 'Fiona Green', role: 'fulfiller' },
+  { id: 'u1', name: 'Alice Johnson', role: 'requester', color: '#3b82f6' },
+  { id: 'u2', name: 'Bob Smith', role: 'requester', color: '#10b981' },
+  { id: 'u3', name: 'Charlie Brown', role: 'requester', color: '#f59e0b' },
+  { id: 'u4', name: 'Dana White', role: 'fulfiller', color: '#ef4444', specialities: ['General'] },
+  { id: 'u5', name: 'Evan Lee', role: 'fulfiller', color: '#8b5cf6', specialities: ['Repair', 'Towing'] },
+  { id: 'u6', name: 'Fiona Green', role: 'fulfiller', color: '#ec4899', specialities: ['Fuel Ute'] },
 ];
+
+const FULFILLER_SPECIALITIES = ['General', 'Fuel Ute', 'Repair', 'Towing'];
 const DEFAULT_EQUIPMENT = [
-  { id: 'e1', name: 'Tractor 1' }, { id: 'e2', name: 'Tractor 2' },
-  { id: 'e3', name: 'Tractor 3' }, { id: 'e4', name: 'Sprayer A' },
-  { id: 'e5', name: 'Sprayer B' }, { id: 'e6', name: 'Quad Bike 1' },
-  { id: 'e7', name: 'Quad Bike 2' }, { id: 'e8', name: 'Harvester' },
+  { id: 'e1', name: 'Tractor 1', icon: '🚜' },
+  { id: 'e2', name: 'Tractor 2', icon: '🚜' },
+  { id: 'e3', name: 'Fuel Ute', icon: '⛽' },
+  { id: 'e4', name: 'EWP (Cherry Picker)', icon: '🏗️' },
+  { id: 'e5', name: 'Harvest Trailer 1', icon: '🚛' },
+  { id: 'e6', name: 'Harvest Trailer 2', icon: '🚛' },
+  { id: 'e7', name: 'Avocado Bin', icon: '🥑' },
+  { id: 'e8', name: 'RTV 1', icon: '🛺' },
+  { id: 'e9', name: 'RTV 2', icon: '🛺' },
+  { id: 'e10', name: 'Sprayer A', icon: '💨' },
+  { id: 'e11', name: 'Quad Bike 1', icon: '🏍️' },
+  { id: 'e12', name: 'Harvester', icon: '🌾' },
 ];
 const DEFAULT_TASKS = [
   { id: 't1', name: 'Refuelling', icon: '⛽' },
@@ -31,6 +41,44 @@ const DEFAULT_TASKS = [
   { id: 't4', name: 'Needs Servicing', icon: '🛠️' },
   { id: 't5', name: 'Flat Tyre', icon: '🛞' },
   { id: 't6', name: 'Battery Flat', icon: '🔋' },
+];
+
+const USER_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16', '#14b8a6', '#6366f1', '#d946ef'];
+const EQUIPMENT_ICONS = [
+  // Tractors & farm machinery
+  '🚜', '🌾', '🧑‍🌾', '👨‍🌾', '👩‍🌾',
+  // Trucks, utes, vans
+  '🛻', '🚛', '🚚', '🚐', '🚗', '🚙',
+  // Small utility vehicles
+  '🛺', '🏍️', '🛵', '🚲',
+  // Lifting / aerial / cranes
+  '🏗️', '🪜', '🛗', '⬆️', '🧗',
+  // Fuel, liquids, spraying
+  '⛽', '💧', '💦', '💨', '🛢️',
+  // Bins, containers, boxes
+  '🥑', '📦', '🪣', '🧺', '🗑️', '🛒',
+  // Tools & repair
+  '🔧', '🛠️', '🪚', '🪓', '⛏️', '🔨', '🪛', '🧰',
+  // Power & parts
+  '🔋', '⚡', '🧯', '⚙️', '🔩', '🛞',
+  // Aviation / other
+  '🚁', '🛩️', '🚤'
+];
+const TASK_ICONS = [
+  // Common tasks
+  '⛽', '🪝', '🔧', '🛠️', '🛞', '🔋',
+  // Warnings & alerts
+  '⚠️', '🚨', '🆘', '❌', '🛑', '🔔',
+  // Physical states
+  '🔥', '💧', '💦', '❄️', '💨', '⚡',
+  // Mechanical
+  '🔩', '⚙️', '🧰', '🪛', '🔨', '🪚',
+  // Communication / admin
+  '📞', '📸', '📋', '✅', '✏️', '📝',
+  // Time / scheduling
+  '⏰', '🕐', '⏳',
+  // Other
+  '💡', '🧹', '♻️', '🔔', '🗑️'
 ];
 
 // ── Orchard locations for geofencing + tile caching ───────────────────────────
@@ -99,7 +147,76 @@ async function precacheTiles(onProgress) {
   return { cached, total: tiles.length };
 }
 
-// ── Local storage helpers (replaces Claude's window.storage for Stackblitz) ───
+// ── Confirmation dialog component (replaces window.confirm which can fail on mobile) ──
+function ConfirmDialog({ message, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-xl">
+        <div className="text-gray-900 font-semibold mb-4 text-center">{message}</div>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-2 border border-gray-300 rounded-lg font-medium">Cancel</button>
+          <button onClick={onConfirm} className="flex-1 py-2 bg-red-600 text-white rounded-lg font-semibold">Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Notification helpers ──────────────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission !== 'denied') {
+    const result = await Notification.requestPermission();
+    return result === 'granted';
+  }
+  return false;
+}
+
+function playNotificationSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContext();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.3, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    o.start();
+    o.stop(ctx.currentTime + 0.3);
+    // Second beep for emphasis
+    setTimeout(() => {
+      const o2 = ctx.createOscillator();
+      const g2 = ctx.createGain();
+      o2.connect(g2); g2.connect(ctx.destination);
+      o2.frequency.value = 1100;
+      g2.gain.setValueAtTime(0.3, ctx.currentTime);
+      g2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      o2.start();
+      o2.stop(ctx.currentTime + 0.3);
+    }, 180);
+  } catch {}
+}
+
+function vibrate() {
+  try { navigator.vibrate?.([100, 50, 100]); } catch {}
+}
+
+function showBrowserNotification(title, body) {
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon: '/favicon.svg',
+        tag: 'orchard-task',
+        requireInteraction: false,
+      });
+    }
+  } catch {}
+}
+
+// ── Local storage helpers ─────────────────────────────────────────────────────
 const storage = {
   get: async (key) => {
     try {
@@ -141,12 +258,22 @@ function centerLng(jobs, myLoc) {
   return lngs.length ? lngs.reduce((a, b) => a + b) / lngs.length : 115.45;
 }
 
-function CanvasMap({ jobs, myLocation, currentUser, onJobSelect, height = 400 }) {
+function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height = 400 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
   const userMarkerRef = useRef(null);
   const [ready, setReady] = useState(false);
+
+  // Expose claim/complete to popup button onclick handlers
+  useEffect(() => {
+    window.__orchardClaim = (id) => onClaim && onClaim(id);
+    window.__orchardComplete = (id) => onComplete && onComplete(id);
+    return () => {
+      delete window.__orchardClaim;
+      delete window.__orchardComplete;
+    };
+  }, [onClaim, onComplete]);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,7 +324,35 @@ function CanvasMap({ jobs, myLocation, currentUser, onJobSelect, height = 400 })
         iconSize: [36, 48], iconAnchor: [18, 48],
       });
       const m = L.marker([job.lat, job.lng], { icon }).addTo(map);
-      m.on('click', () => onJobSelect && onJobSelect(job));
+
+      // Build the tooltip HTML with task details
+      const statusText = job.status === 'open' ? '🆕 Open'
+        : job.status === 'claimed' ? `👷 Claimed by ${job.claimedByName || 'someone'}`
+        : '✅ Completed';
+      const mins = Math.floor((Date.now() - job.createdAt) / 60000);
+      const timeAgo = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins/60)}h ago`;
+      const noteHtml = job.note ? `<div style="font-style:italic;color:#6b7280;margin-top:6px;font-size:12px">"${job.note.replace(/"/g, '&quot;')}"</div>` : '';
+      const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${job.lat},${job.lng}`;
+      const popupHtml = `
+        <div style="min-width:200px;padding:4px">
+          <div style="display:flex;align-items:start;gap:8px;margin-bottom:6px">
+            <span style="font-size:24px">${job.taskIcon}</span>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:14px;color:#111">${job.taskName}</div>
+              <div style="font-size:12px;color:#4b5563">${job.equipmentIcon || ''} ${job.equipmentName}</div>
+              <div style="font-size:11px;color:#6b7280;margin-top:2px">by ${job.requesterName} · ${timeAgo}</div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:#374151;margin-bottom:6px">${statusText}</div>
+          ${noteHtml}
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <a href="${navUrl}" target="_blank" rel="noopener" style="flex:1;background:#e5e7eb;color:#111;text-decoration:none;padding:8px;border-radius:6px;text-align:center;font-size:12px;font-weight:600">🧭 Navigate</a>
+            ${job.status === 'open' ? `<button onclick="window.__orchardClaim && window.__orchardClaim('${job.id}')" style="flex:1;background:#16a34a;color:white;border:0;padding:8px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Claim</button>` : ''}
+            ${job.status === 'claimed' && isMine ? `<button onclick="window.__orchardComplete && window.__orchardComplete('${job.id}')" style="flex:1;background:#2563eb;color:white;border:0;padding:8px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Complete</button>` : ''}
+          </div>
+        </div>
+      `;
+      m.bindPopup(popupHtml, { maxWidth: 280, className: 'orchard-popup' });
       markersRef.current.push(m);
     });
     if (jobs.length) {
@@ -310,10 +465,14 @@ export default function OrchardApp() {
   const [authChecking, setAuthChecking] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [users, setUsers] = useState(DEFAULT_USERS);
+  const [equipment, setEquipment] = useState(DEFAULT_EQUIPMENT);
+  const [taskTypes, setTaskTypes] = useState(DEFAULT_TASKS);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('list');
   const [showNewJob, setShowNewJob] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [notification, setNotification] = useState(null);
   const [myLocation, setMyLocation] = useState(null);
   const [cacheStatus, setCacheStatus] = useState(null);
@@ -325,6 +484,20 @@ export default function OrchardApp() {
       if (stored === 'ok') setAuthed(true);
     } catch {}
     setAuthChecking(false);
+  }, []);
+
+  // Load dimension tables from localStorage (fall back to defaults)
+  useEffect(() => {
+    (async () => {
+      try {
+        const u = await storage.get('orchard-users');
+        if (u?.value) setUsers(JSON.parse(u.value));
+        const e = await storage.get('orchard-equipment');
+        if (e?.value) setEquipment(JSON.parse(e.value));
+        const t = await storage.get('orchard-tasks');
+        if (t?.value) setTaskTypes(JSON.parse(t.value));
+      } catch {}
+    })();
   }, []);
 
   useEffect(() => {
@@ -364,10 +537,51 @@ export default function OrchardApp() {
     }
   }, []);
 
+  // Ask for notification permission on first authed load
+  useEffect(() => {
+    if (authed) requestNotificationPermission();
+  }, [authed]);
+
+  const prevJobsRef = useRef([]);
   const loadJobs = async () => {
     try {
       const r = await storage.get('orchard-jobs');
-      setJobs(r?.value ? JSON.parse(r.value) : []);
+      const newJobs = r?.value ? JSON.parse(r.value) : [];
+
+      // Detect events vs. previous state and notify the current user if relevant
+      if (currentUser && prevJobsRef.current.length > 0) {
+        const prevIds = new Set(prevJobsRef.current.map(j => j.id));
+        const prevById = Object.fromEntries(prevJobsRef.current.map(j => [j.id, j]));
+
+        // Fulfiller: new OPEN task appeared
+        if (currentUser.role === 'fulfiller') {
+          const newOpen = newJobs.filter(j => j.status === 'open' && !prevIds.has(j.id));
+          newOpen.forEach(j => {
+            playNotificationSound();
+            vibrate();
+            showBrowserNotification('🆕 New task', `${j.taskIcon} ${j.taskName} · ${j.equipmentName}`);
+            setNotification({ msg: `🆕 New task: ${j.taskName} (${j.equipmentName})`, type: 'info' });
+            setTimeout(() => setNotification(null), 5000);
+          });
+        }
+
+        // Requester: my task was marked completed
+        if (currentUser.role === 'requester') {
+          newJobs.forEach(j => {
+            const prev = prevById[j.id];
+            if (prev && prev.status !== 'completed' && j.status === 'completed' && j.requesterId === currentUser.id) {
+              playNotificationSound();
+              vibrate();
+              showBrowserNotification('✅ Task completed', `${j.taskIcon} ${j.taskName} done by ${j.claimedByName || 'a fulfiller'}`);
+              setNotification({ msg: `✅ Your task "${j.taskName}" has been completed!`, type: 'success' });
+              setTimeout(() => setNotification(null), 5000);
+            }
+          });
+        }
+      }
+
+      prevJobsRef.current = newJobs;
+      setJobs(newJobs);
     } catch { setJobs([]); }
     setLoading(false);
   };
@@ -377,20 +591,33 @@ export default function OrchardApp() {
     setJobs(updated);
   };
 
+  const saveUsers = async (updated) => {
+    await storage.set('orchard-users', JSON.stringify(updated));
+    setUsers(updated);
+  };
+  const saveEquipment = async (updated) => {
+    await storage.set('orchard-equipment', JSON.stringify(updated));
+    setEquipment(updated);
+  };
+  const saveTaskTypes = async (updated) => {
+    await storage.set('orchard-tasks', JSON.stringify(updated));
+    setTaskTypes(updated);
+  };
+
   const showNotif = (msg, type = 'success') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
   };
 
   const handleCreateJob = async (job) => {
-    const newJob = { id: `job_${Date.now()}`, ...job, requesterId: currentUser.id, requesterName: currentUser.name, status: 'open', createdAt: Date.now(), claimedBy: null, claimedByName: null, completedAt: null };
+    const newJob = { id: `job_${Date.now()}`, ...job, requesterId: currentUser.id, requesterName: currentUser.name, requesterColor: currentUser.color, status: 'open', createdAt: Date.now(), claimedBy: null, claimedByName: null, completedAt: null };
     await saveJobs([newJob, ...jobs]);
     setShowNewJob(false);
     showNotif('Task submitted!');
   };
 
   const handleClaim = async (jobId) => {
-    await saveJobs(jobs.map(j => j.id === jobId ? { ...j, status: 'claimed', claimedBy: currentUser.id, claimedByName: currentUser.name, claimedAt: Date.now() } : j));
+    await saveJobs(jobs.map(j => j.id === jobId ? { ...j, status: 'claimed', claimedBy: currentUser.id, claimedByName: currentUser.name, claimedColor: currentUser.color, claimedAt: Date.now() } : j));
     showNotif('Task claimed');
   };
 
@@ -406,7 +633,8 @@ export default function OrchardApp() {
 
   if (authChecking || loading) return <div className="flex items-center justify-center h-screen bg-green-50"><div className="text-green-800">Loading…</div></div>;
   if (!authed) return <GateScreen onSuccess={() => { try { sessionStorage.setItem('orchard-auth', 'ok'); } catch {} setAuthed(true); }} />;
-  if (!currentUser) return <LoginScreen users={DEFAULT_USERS} onSelect={setCurrentUser} />;
+  if (showAdmin) return <AdminScreen users={users} equipment={equipment} taskTypes={taskTypes} saveUsers={saveUsers} saveEquipment={saveEquipment} saveTaskTypes={saveTaskTypes} onClose={() => setShowAdmin(false)} showNotif={showNotif} />;
+  if (!currentUser) return <LoginScreen users={users} onSelect={setCurrentUser} onAdmin={() => setShowAdmin(true)} />;
 
   const activeJobs = jobs.filter(j => j.status !== 'completed');
   const completedJobs = jobs.filter(j => j.status === 'completed');
@@ -419,11 +647,14 @@ export default function OrchardApp() {
           <div className="flex items-center gap-2">
             <div className="text-2xl">🥑</div>
             <div>
-              <div className="font-bold">Orchard Tasks</div>
-              <div className="text-xs text-green-200">{currentUser.name} · {currentUser.role === 'requester' ? 'Requester' : 'Fulfiller'}</div>
+              <div className="font-bold">HarvestPulse</div>
+              <div className="text-xs text-green-200">{currentUser.name} · {currentUser.role === 'requester' ? 'Requester' : `Fulfiller${currentUser.specialities?.length ? ' · ' + currentUser.specialities.join(', ') : ''}`}</div>
             </div>
           </div>
-          <button onClick={() => setCurrentUser(null)} className="p-2 hover:bg-green-700 rounded-full"><LogOut size={20} /></button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setShowAdmin(true)} className="p-2 hover:bg-green-700 rounded-full" title="Admin settings"><Settings size={20} /></button>
+            <button onClick={() => setCurrentUser(null)} className="p-2 hover:bg-green-700 rounded-full" title="Switch user"><LogOut size={20} /></button>
+          </div>
         </div>
       </div>
 
@@ -448,14 +679,13 @@ export default function OrchardApp() {
           <span>✅</span> Satellite map ready offline — all 3 orchards cached
         </div>
       )}
-      {cacheStatus === 'skipped' && (
-        <div className="bg-gray-500 text-white px-4 py-2 text-xs flex items-center gap-2">
-          <span>ℹ️</span> Offline map cache not available in this environment
-        </div>
-      )}
 
       {notification && (
-        <div className={`fixed top-20 left-4 right-4 z-50 p-3 rounded-lg shadow-lg text-white text-center ${notification.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
+        <div className={`fixed top-20 left-4 right-4 z-50 p-3 rounded-lg shadow-lg text-white text-center font-medium ${
+          notification.type === 'success' ? 'bg-green-600' :
+          notification.type === 'error' ? 'bg-red-600' :
+          notification.type === 'info' ? 'bg-blue-600' : 'bg-green-600'
+        }`}>
           {notification.msg}
         </div>
       )}
@@ -476,7 +706,7 @@ export default function OrchardApp() {
 
       {showNewJob && (
         <NewJobModal
-          equipment={DEFAULT_EQUIPMENT} taskTypes={DEFAULT_TASKS}
+          equipment={equipment} taskTypes={taskTypes}
           onSubmit={handleCreateJob} onCancel={() => setShowNewJob(false)}
           myLocation={myLocation}
         />
@@ -513,7 +743,7 @@ function GateScreen({ onSuccess }) {
     <div className="min-h-screen bg-gradient-to-b from-green-700 to-green-900 p-6 flex flex-col items-center justify-center">
       <div className="text-center text-white mb-8">
         <div className="text-6xl mb-3">🥑</div>
-        <h1 className="text-3xl font-bold">Orchard Tasks</h1>
+        <h1 className="text-3xl font-bold">HarvestPulse</h1>
         <p className="text-green-200 mt-2 text-sm">Restricted access</p>
       </div>
       <div className="bg-white rounded-2xl p-6 shadow-xl w-full max-w-sm">
@@ -558,29 +788,399 @@ function GateScreen({ onSuccess }) {
   );
 }
 
-function LoginScreen({ users, onSelect }) {
+function LoginScreen({ users, onSelect, onAdmin }) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-700 to-green-900 p-6 flex flex-col">
-      <div className="text-center text-white mb-8 mt-8">
+      <div className="text-center text-white mb-6 mt-4">
         <div className="text-6xl mb-3">🥑</div>
-        <h1 className="text-3xl font-bold">Orchard Tasks</h1>
-        <p className="text-green-200 mt-2">Select your name to continue</p>
+        <h1 className="text-3xl font-bold">HarvestPulse</h1>
+        <p className="text-green-200 mt-2">Select your name and role</p>
       </div>
       <div className="bg-white rounded-2xl p-4 shadow-xl flex-1 overflow-y-auto">
-        {['requester', 'fulfiller'].map(role => (
-          <div key={role} className="mb-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">{role}s</h2>
+        {['requester', 'fulfiller'].map(role => {
+          const list = users.filter(u => u.role === role);
+          if (!list.length) return null;
+          return (
+            <div key={role} className="mb-4">
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">{role}s</h2>
+              {list.map(u => (
+                <button key={u.id} onClick={() => onSelect(u)}
+                  className="w-full flex items-center gap-3 p-3 hover:bg-green-50 rounded-lg border border-transparent hover:border-green-200 transition mb-1">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold"
+                    style={{ background: u.color || '#6b7280' }}>
+                    {u.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="font-medium text-gray-800">{u.name}</span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={onAdmin} className="mt-4 flex items-center justify-center gap-2 text-green-200 hover:text-white text-sm py-2">
+        <Settings size={16} /> Admin settings
+      </button>
+    </div>
+  );
+}
+
+// ── Admin screen ──────────────────────────────────────────────────────────────
+function AdminScreen({ users, equipment, taskTypes, saveUsers, saveEquipment, saveTaskTypes, onClose, showNotif }) {
+  const [authed, setAuthed] = useState(false);
+  const [tab, setTab] = useState('users');
+  const [pwd, setPwd] = useState('');
+  const [err, setErr] = useState('');
+  const fileRef = useRef(null);
+
+  if (!authed) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-green-700 to-green-900 p-6 flex flex-col items-center justify-center">
+        <div className="bg-white rounded-2xl p-6 shadow-xl w-full max-w-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-bold text-lg flex items-center gap-2"><Settings size={20} /> Admin access</h2>
+            <button onClick={onClose} className="text-gray-400"><X size={20} /></button>
+          </div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Admin code</label>
+          <input type="password" value={pwd} autoFocus
+            onChange={e => { setPwd(e.target.value); setErr(''); }}
+            onKeyDown={e => e.key === 'Enter' && (pwd === ADMIN_OVERRIDE_CODE ? setAuthed(true) : setErr('Wrong code'))}
+            className="w-full border border-gray-300 rounded-lg p-3 mb-3 focus:outline-none focus:border-green-600"
+            placeholder="Enter admin code" />
+          {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
+          <button onClick={() => pwd === ADMIN_OVERRIDE_CODE ? setAuthed(true) : setErr('Wrong code')}
+            className="w-full bg-green-700 text-white font-bold py-3 rounded-lg">Unlock admin</button>
+        </div>
+      </div>
+    );
+  }
+
+  // CSV helpers
+  const toCSV = (rows, cols) => {
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
+  };
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) return [];
+    const parseLine = (line) => {
+      const result = [];
+      let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') {
+          if (inQ && line[i + 1] === '"') { cur += '"'; i++; } else inQ = !inQ;
+        } else if (c === ',' && !inQ) { result.push(cur); cur = ''; } else cur += c;
+      }
+      result.push(cur);
+      return result;
+    };
+    const headers = parseLine(lines[0]).map(h => h.trim());
+    return lines.slice(1).map(line => {
+      const vals = parseLine(line);
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = vals[i] ?? '');
+      return obj;
+    });
+  };
+
+  const download = (filename, content) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAll = () => {
+    download('orchard-users.csv', toCSV(users, ['id', 'name', 'role', 'color']));
+    setTimeout(() => download('orchard-equipment.csv', toCSV(equipment, ['id', 'name', 'icon'])), 200);
+    setTimeout(() => download('orchard-tasks.csv', toCSV(taskTypes, ['id', 'name', 'icon'])), 400);
+    showNotif('3 CSV files downloaded');
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const rows = parseCSV(text);
+    if (!rows.length) { showNotif('Empty or invalid CSV', 'error'); return; }
+    const first = rows[0];
+    // Decide which table based on columns present
+    if ('role' in first) {
+      await saveUsers(rows.map((r, i) => ({ id: r.id || `u${Date.now()}_${i}`, name: r.name, role: r.role || 'requester', color: r.color || USER_COLORS[i % USER_COLORS.length] })));
+      showNotif(`Imported ${rows.length} users`);
+    } else if ('icon' in first) {
+      // Could be equipment or tasks — ask user? For now detect by name of currently selected tab
+      if (tab === 'equipment') {
+        await saveEquipment(rows.map((r, i) => ({ id: r.id || `e${Date.now()}_${i}`, name: r.name, icon: r.icon || '🔧' })));
+        showNotif(`Imported ${rows.length} equipment items`);
+      } else {
+        await saveTaskTypes(rows.map((r, i) => ({ id: r.id || `t${Date.now()}_${i}`, name: r.name, icon: r.icon || '🔧' })));
+        showNotif(`Imported ${rows.length} task types`);
+      }
+    } else {
+      showNotif('CSV missing required columns (role, or icon)', 'error');
+    }
+    e.target.value = '';
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-green-800 text-white p-4 sticky top-0 z-10 shadow-md flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Settings size={20} />
+          <div className="font-bold">Admin Settings</div>
+        </div>
+        <button onClick={onClose} className="p-2 hover:bg-green-700 rounded-full"><X size={20} /></button>
+      </div>
+
+      <div className="flex gap-1 bg-white shadow-sm p-1 border-b">
+        {[['users', 'Users'], ['equipment', 'Equipment'], ['tasks', 'Tasks']].map(([k, lbl]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`flex-1 py-2 rounded-md font-medium text-sm ${tab === k ? 'bg-green-700 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      <div className="p-4">
+        <div className="flex gap-2 mb-4">
+          <button onClick={exportAll} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-1">
+            <Download size={16} /> Export all CSVs
+          </button>
+          <button onClick={() => fileRef.current?.click()} className="flex-1 bg-white border border-gray-300 rounded-lg py-2 text-sm font-medium flex items-center justify-center gap-1">
+            <Upload size={16} /> Import CSV
+          </button>
+          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleImport} />
+        </div>
+
+        {tab === 'users' && <UsersAdmin users={users} saveUsers={saveUsers} />}
+        {tab === 'equipment' && <EquipmentAdmin equipment={equipment} saveEquipment={saveEquipment} />}
+        {tab === 'tasks' && <TaskTypesAdmin taskTypes={taskTypes} saveTaskTypes={saveTaskTypes} />}
+      </div>
+    </div>
+  );
+}
+
+function UsersAdmin({ users, saveUsers }) {
+  const [editing, setEditing] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const addUser = () => {
+    const n = { id: `u${Date.now()}`, name: 'New user', role: 'requester', color: USER_COLORS[users.length % USER_COLORS.length] };
+    setEditing(n);
+  };
+
+  const save = async (u) => {
+    const exists = users.some(x => x.id === u.id);
+    await saveUsers(exists ? users.map(x => x.id === u.id ? u : x) : [...users, u]);
+    setEditing(null);
+  };
+
+  const remove = async () => {
+    if (!confirmDel) return;
+    await saveUsers(users.filter(u => u.id !== confirmDel.id));
+    setConfirmDel(null);
+  };
+
+  return (
+    <div>
+      <button onClick={addUser} className="w-full bg-green-700 text-white py-3 rounded-lg font-semibold mb-3 flex items-center justify-center gap-2">
+        <Plus size={18} /> Add user
+      </button>
+      {['requester', 'fulfiller'].map(role => (
+        <div key={role} className="mb-4">
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">{role}s</h3>
+          <div className="space-y-2">
             {users.filter(u => u.role === role).map(u => (
-              <button key={u.id} onClick={() => onSelect(u)}
-                className="w-full flex items-center gap-3 p-3 hover:bg-green-50 rounded-lg border border-transparent hover:border-green-200 transition mb-1">
-                <div className={`w-10 h-10 ${role === 'requester' ? 'bg-blue-100' : 'bg-orange-100'} rounded-full flex items-center justify-center`}>
-                  {role === 'requester' ? <User size={20} className="text-blue-700" /> : <Wrench size={20} className="text-orange-700" />}
+              <div key={u.id} className="bg-white rounded-lg p-3 shadow-sm flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style={{ background: u.color }}>
+                  {u.name.charAt(0).toUpperCase()}
                 </div>
-                <span className="font-medium text-gray-800">{u.name}</span>
-              </button>
+                <div className="flex-1">
+                  <div className="font-medium">{u.name}</div>
+                  <div className="text-xs text-gray-500">{u.role}{u.specialities?.length ? ` · ${u.specialities.join(', ')}` : ''}</div>
+                </div>
+                <button onClick={() => setEditing(u)} className="p-2 text-gray-500 hover:text-blue-600"><Edit2 size={16} /></button>
+                <button onClick={() => setConfirmDel(u)} className="p-2 text-gray-500 hover:text-red-600"><Trash2 size={16} /></button>
+              </div>
             ))}
           </div>
+        </div>
+      ))}
+      {editing && <UserEditor user={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {confirmDel && <ConfirmDialog message={`Delete user "${confirmDel.name}"?`} onConfirm={remove} onCancel={() => setConfirmDel(null)} />}
+    </div>
+  );
+}
+
+function UserEditor({ user, onSave, onCancel }) {
+  const [u, setU] = useState(user);
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-end sm:items-center justify-center">
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-lg">Edit user</h3>
+          <button onClick={onCancel}><X size={20} /></button>
+        </div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Name</label>
+        <input value={u.name} onChange={e => setU({ ...u, name: e.target.value })}
+          className="w-full border border-gray-300 rounded-lg p-3 mb-3" />
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Role</label>
+        <div className="flex gap-2 mb-3">
+          {['requester', 'fulfiller'].map(r => (
+            <button key={r} onClick={() => setU({
+              ...u,
+              role: r,
+              specialities: r === 'fulfiller' ? (u.specialities?.length ? u.specialities : ['General']) : undefined,
+            })}
+              className={`flex-1 py-2 rounded-lg font-medium ${u.role === r ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}>
+              {r}
+            </button>
+          ))}
+        </div>
+        {u.role === 'fulfiller' && (
+          <>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Specialities <span className="text-gray-400 font-normal">(tap to toggle, pick one or more)</span></label>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {FULFILLER_SPECIALITIES.map(s => {
+                const selected = (u.specialities || []).includes(s);
+                return (
+                  <button key={s} onClick={() => {
+                    const curr = u.specialities || [];
+                    const next = selected ? curr.filter(x => x !== s) : [...curr, s];
+                    setU({ ...u, specialities: next });
+                  }}
+                    className={`py-2 px-3 rounded-lg text-sm font-medium flex items-center justify-center gap-1 ${selected ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700 border border-gray-300'}`}>
+                    {selected && <Check size={14} />} {s}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-xs text-gray-500 mb-3">ℹ️ All fulfillers see all tasks for now. Specialities will be used later for task routing.</div>
+          </>
+        )}
+        <label className="block text-sm font-semibold text-gray-700 mb-2">Colour</label>
+        <div className="grid grid-cols-6 gap-2 mb-4">
+          {USER_COLORS.map(c => (
+            <button key={c} onClick={() => setU({ ...u, color: c })}
+              className={`w-full aspect-square rounded-full border-4 flex items-center justify-center ${u.color === c ? 'border-gray-800' : 'border-transparent'}`}
+              style={{ background: c }}>
+              {u.color === c && <Check size={16} className="text-white" />}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-2 border border-gray-300 rounded-lg">Cancel</button>
+          <button onClick={() => onSave(u)} disabled={!u.name.trim()}
+            className="flex-1 py-2 bg-green-700 text-white rounded-lg font-semibold disabled:bg-gray-300">Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EquipmentAdmin({ equipment, saveEquipment }) {
+  const [editing, setEditing] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const add = () => setEditing({ id: `e${Date.now()}`, name: 'New equipment', icon: '🔧' });
+  const save = async (item) => {
+    const exists = equipment.some(x => x.id === item.id);
+    await saveEquipment(exists ? equipment.map(x => x.id === item.id ? item : x) : [...equipment, item]);
+    setEditing(null);
+  };
+  const remove = async () => {
+    if (!confirmDel) return;
+    await saveEquipment(equipment.filter(e => e.id !== confirmDel.id));
+    setConfirmDel(null);
+  };
+
+  return (
+    <div>
+      <button onClick={add} className="w-full bg-green-700 text-white py-3 rounded-lg font-semibold mb-3 flex items-center justify-center gap-2">
+        <Plus size={18} /> Add equipment
+      </button>
+      <div className="space-y-2">
+        {equipment.map(e => (
+          <div key={e.id} className="bg-white rounded-lg p-3 shadow-sm flex items-center gap-3">
+            <div className="text-2xl">{e.icon}</div>
+            <div className="flex-1 font-medium">{e.name}</div>
+            <button onClick={() => setEditing(e)} className="p-2 text-gray-500 hover:text-blue-600"><Edit2 size={16} /></button>
+            <button onClick={() => setConfirmDel(e)} className="p-2 text-gray-500 hover:text-red-600"><Trash2 size={16} /></button>
+          </div>
         ))}
+      </div>
+      {editing && <ItemEditor item={editing} icons={EQUIPMENT_ICONS} title="equipment" onSave={save} onCancel={() => setEditing(null)} />}
+      {confirmDel && <ConfirmDialog message={`Delete "${confirmDel.name}"?`} onConfirm={remove} onCancel={() => setConfirmDel(null)} />}
+    </div>
+  );
+}
+
+function TaskTypesAdmin({ taskTypes, saveTaskTypes }) {
+  const [editing, setEditing] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const add = () => setEditing({ id: `t${Date.now()}`, name: 'New task', icon: '🔧' });
+  const save = async (item) => {
+    const exists = taskTypes.some(x => x.id === item.id);
+    await saveTaskTypes(exists ? taskTypes.map(x => x.id === item.id ? item : x) : [...taskTypes, item]);
+    setEditing(null);
+  };
+  const remove = async () => {
+    if (!confirmDel) return;
+    await saveTaskTypes(taskTypes.filter(t => t.id !== confirmDel.id));
+    setConfirmDel(null);
+  };
+
+  return (
+    <div>
+      <button onClick={add} className="w-full bg-green-700 text-white py-3 rounded-lg font-semibold mb-3 flex items-center justify-center gap-2">
+        <Plus size={18} /> Add task type
+      </button>
+      <div className="space-y-2">
+        {taskTypes.map(t => (
+          <div key={t.id} className="bg-white rounded-lg p-3 shadow-sm flex items-center gap-3">
+            <div className="text-2xl">{t.icon}</div>
+            <div className="flex-1 font-medium">{t.name}</div>
+            <button onClick={() => setEditing(t)} className="p-2 text-gray-500 hover:text-blue-600"><Edit2 size={16} /></button>
+            <button onClick={() => setConfirmDel(t)} className="p-2 text-gray-500 hover:text-red-600"><Trash2 size={16} /></button>
+          </div>
+        ))}
+      </div>
+      {editing && <ItemEditor item={editing} icons={TASK_ICONS} title="task type" onSave={save} onCancel={() => setEditing(null)} />}
+      {confirmDel && <ConfirmDialog message={`Delete "${confirmDel.name}"?`} onConfirm={remove} onCancel={() => setConfirmDel(null)} />}
+    </div>
+  );
+}
+
+function ItemEditor({ item, icons, title, onSave, onCancel }) {
+  const [i, setI] = useState(item);
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-end sm:items-center justify-center">
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-bold text-lg">Edit {title}</h3>
+          <button onClick={onCancel}><X size={20} /></button>
+        </div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Name</label>
+        <input value={i.name} onChange={e => setI({ ...i, name: e.target.value })}
+          className="w-full border border-gray-300 rounded-lg p-3 mb-3" />
+        <label className="block text-sm font-semibold text-gray-700 mb-2">Icon</label>
+        <div className="grid grid-cols-6 gap-2 mb-4">
+          {icons.map(ic => (
+            <button key={ic} onClick={() => setI({ ...i, icon: ic })}
+              className={`p-2 rounded-lg border-2 text-2xl ${i.icon === ic ? 'border-green-600 bg-green-50' : 'border-gray-200'}`}>
+              {ic}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-2 border border-gray-300 rounded-lg">Cancel</button>
+          <button onClick={() => onSave(i)} disabled={!i.name.trim()}
+            className="flex-1 py-2 bg-green-700 text-white rounded-lg font-semibold disabled:bg-gray-300">Save</button>
+        </div>
       </div>
     </div>
   );
@@ -671,7 +1271,7 @@ function FulfillerView({ activeJobs, completedJobs, openJobs, view, setView, onC
         </div>
       ) : (
         <div>
-          <CanvasMap jobs={activeJobs} myLocation={myLocation} currentUser={currentUser} onJobSelect={setSelectedJob} height={480} />
+          <CanvasMap jobs={activeJobs} myLocation={myLocation} currentUser={currentUser} onClaim={onClaim} onComplete={onComplete} height={480} />
           <div className="flex gap-4 justify-center text-xs mt-2 text-gray-600">
             <span>🔴 Open</span><span>🔵 Mine</span><span>⚫ Others</span><span>🔵● You</span>
           </div>
