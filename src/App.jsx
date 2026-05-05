@@ -6,7 +6,7 @@ import { collection, doc, onSnapshot, setDoc, deleteDoc } from 'firebase/firesto
 // ══════════════════════════════════════════════════════════════════════════════
 // ⚠️ CHANGE THESE BEFORE DEPLOYING ⚠️
 // ══════════════════════════════════════════════════════════════════════════════
-const APP_PASSWORD = 'orchard2026';
+const APP_PASSWORD = 'avocado123';
 const ADMIN_OVERRIDE_CODE = 'admin-bypass-2026';
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -224,6 +224,15 @@ function loadLeaflet() {
     css.rel = 'stylesheet';
     css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
     document.head.appendChild(css);
+    // Add tiny CSS fix for divIcon defaults
+    const style = document.createElement('style');
+    style.innerHTML = `
+      .orchard-pin, .user-pin, .pin-adj {
+        background: transparent !important;
+        border: 0 !important;
+      }
+    `;
+    document.head.appendChild(style);
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
     script.onload = () => setTimeout(() => resolve(window.L), 100);
@@ -284,14 +293,14 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
       const color = isOpen ? '#dc2626' : isMine ? '#2563eb' : '#6b7280';
       const icon = L.divIcon({
         className: 'orchard-pin',
-        html: `<div style="position:relative;transform:translate(-50%,-100%)">
-          <svg width="36" height="48" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">
+        html: `<div style="position:relative;width:36px;height:48px">
+          <svg width="36" height="48" viewBox="0 0 36 48" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));display:block">
             <path d="M18 0 C8 0 0 8 0 18 C0 30 18 48 18 48 C18 48 36 30 36 18 C36 8 28 0 18 0 Z" fill="${color}" stroke="white" stroke-width="2"/>
             <circle cx="18" cy="18" r="7" fill="white"/>
           </svg>
-          <div style="position:absolute;top:9px;left:50%;transform:translateX(-50%);font-size:14px">${job.taskIcon}</div>
+          <div style="position:absolute;top:9px;left:0;width:36px;text-align:center;font-size:14px;line-height:1">${job.taskIcon}</div>
         </div>`,
-        iconSize: [36, 48], iconAnchor: [18, 48],
+        iconSize: [36, 48], iconAnchor: [18, 48], popupAnchor: [0, -48],
       });
       const m = L.marker([job.lat, job.lng], { icon }).addTo(map);
 
@@ -338,9 +347,9 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
     if (userMarkerRef.current) map.removeLayer(userMarkerRef.current);
     const icon = L.divIcon({
       className: 'user-pin',
-      html: `<div style="position:relative;transform:translate(-50%,-50%)">
+      html: `<div style="position:relative;width:18px;height:18px">
         <div style="width:30px;height:30px;background:rgba(59,130,246,.3);border-radius:50%;position:absolute;top:-6px;left:-6px"></div>
-        <div style="width:18px;height:18px;background:#3b82f6;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.4);position:relative"></div>
+        <div style="width:18px;height:18px;background:#3b82f6;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.4);position:absolute;top:0;left:0;box-sizing:border-box"></div>
       </div>`,
       iconSize: [18, 18], iconAnchor: [9, 9],
     });
