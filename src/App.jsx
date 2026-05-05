@@ -266,7 +266,18 @@ function CanvasMap({ jobs, myLocation, currentUser, onClaim, onComplete, height 
       const center = jobs.length ? [jobs[0].lat, jobs[0].lng]
         : myLocation ? [myLocation.lat, myLocation.lng]
         : [ORCHARDS[0].center.lat, ORCHARDS[0].center.lng];
-      const map = L.map(containerRef.current, { center, zoom: 16, zoomControl: true });
+      const map = L.map(containerRef.current, {
+        center, zoom: 16, zoomControl: true,
+        scrollWheelZoom: false,  // disable plain scroll-zoom on desktop (was blocking page scroll)
+      });
+      // Enable Ctrl/Cmd+scroll to zoom on desktop (still allows pinch-zoom on mobile)
+      containerRef.current.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          map.scrollWheelZoom.enable();
+          setTimeout(() => map.scrollWheelZoom.disable(), 200);
+        }
+      }, { passive: false });
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         { attribution: 'Tiles © Esri', maxZoom: 19 }).addTo(map);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
@@ -379,7 +390,17 @@ function PinAdjuster({ initialLat, initialLng, onChange }) {
     let cancelled = false;
     loadLeaflet().then(L => {
       if (cancelled || !containerRef.current || mapRef.current) return;
-      const map = L.map(containerRef.current, { center: [initialLat, initialLng], zoom: 18, zoomControl: true });
+      const map = L.map(containerRef.current, {
+        center: [initialLat, initialLng], zoom: 18, zoomControl: true,
+        scrollWheelZoom: false,
+      });
+      containerRef.current.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          map.scrollWheelZoom.enable();
+          setTimeout(() => map.scrollWheelZoom.disable(), 200);
+        }
+      }, { passive: false });
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         { attribution: 'Tiles © Esri', maxZoom: 19 }).addTo(map);
       const icon = L.divIcon({
@@ -584,10 +605,34 @@ export default function OrchardApp() {
   };
 
   const handleCreateJob = async (job) => {
-    const newJob = { id: `job_${Date.now()}`, ...job, requesterId: currentUser.id, requesterName: currentUser.name, requesterColor: currentUser.color, status: 'open', createdAt: Date.now(), claimedBy: null, claimedByName: null, completedAt: null };
+    const newJob = {
+      id: `job_${Date.now()}`, ...job,
+      requesterId: currentUser.id, requesterName: currentUser.name, requesterColor: currentUser.color,
+      status: 'open', createdAt: Date.now(),
+      claimedBy: null, claimedByName: null, completedAt: null,
+      archived: false,
+      editHistory: [],
+    };
     await firestoreSaveJob(newJob);
     setShowNewJob(false);
     showNotif('Task submitted!');
+  };
+
+  const handleEditJob = async (jobId, updates) => {
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) return;
+    const editEntry = {
+      editedAt: Date.now(),
+      editedBy: currentUser.id,
+      editedByName: currentUser.name,
+      changes: Object.keys(updates),
+    };
+    await firestoreSaveJob({
+      ...job,
+      ...updates,
+      editHistory: [...(job.editHistory || []), editEntry],
+    });
+    showNotif('Task updated');
   };
 
   const handleClaim = async (jobId) => {
@@ -604,14 +649,36 @@ export default function OrchardApp() {
     showNotif('Task completed ✓');
   };
 
+  const handleArchive = async (jobId) => {
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) return;
+    await firestoreSaveJob({
+      ...job,
+      archived: true,
+      archivedAt: Date.now(),
+      archivedBy: currentUser.id,
+      archivedByName: currentUser.name,
+    });
+    showNotif('Task archived (kept in records)');
+  };
+
   const [confirmDelJob, setConfirmDelJob] = useState(null);
+  const [confirmArchiveJob, setConfirmArchiveJob] = useState(null);
   const handleDelete = (jobId) => {
     const job = jobs.find(j => j.id === jobId);
     setConfirmDelJob(job);
   };
+  const handleArchiveRequest = (jobId) => {
+    const job = jobs.find(j => j.id === jobId);
+    setConfirmArchiveJob(job);
+  };
   const doDeleteJob = async () => {
     if (confirmDelJob) await firestoreDeleteJob(confirmDelJob.id);
     setConfirmDelJob(null);
+  };
+  const doArchiveJob = async () => {
+    if (confirmArchiveJob) await handleArchive(confirmArchiveJob.id);
+    setConfirmArchiveJob(null);
   };
 
   if (authChecking || loading) return <div className="flex items-center justify-center h-screen bg-green-50"><div className="text-green-800">Loading…</div></div>;
@@ -619,8 +686,9 @@ export default function OrchardApp() {
   if (showAdmin) return <AdminScreen users={users} equipment={equipment} taskTypes={taskTypes} saveUsers={saveUsers} saveEquipment={saveEquipment} saveTaskTypes={saveTaskTypes} onClose={() => setShowAdmin(false)} showNotif={showNotif} />;
   if (!currentUser) return <LoginScreen users={users} onSelect={setCurrentUser} onAdmin={() => setShowAdmin(true)} />;
 
-  const activeJobs = jobs.filter(j => j.status !== 'completed');
-  const completedJobs = jobs.filter(j => j.status === 'completed');
+  const visibleJobs = jobs.filter(j => !j.archived);
+  const activeJobs = visibleJobs.filter(j => j.status !== 'completed');
+  const completedJobs = visibleJobs.filter(j => j.status === 'completed');
   const openJobs = activeJobs.filter(j => j.status === 'open');
 
   return (
@@ -675,14 +743,24 @@ export default function OrchardApp() {
 
       <div className="p-4">
         {currentUser.role === 'requester' ? (
-          <RequesterView jobs={jobs.filter(j => j.requesterId === currentUser.id)} onNewJob={() => setShowNewJob(true)} onDelete={handleDelete} />
+          <RequesterView
+            jobs={visibleJobs.filter(j => j.requesterId === currentUser.id)}
+            onNewJob={() => setShowNewJob(true)}
+            onDelete={handleDelete}
+            onEdit={handleEditJob}
+            equipment={equipment}
+            taskTypes={taskTypes}
+            myLocation={myLocation}
+          />
         ) : (
           <FulfillerView
             activeJobs={activeJobs} completedJobs={completedJobs} openJobs={openJobs}
             view={view} setView={setView}
             onClaim={handleClaim} onComplete={handleComplete}
+            onArchive={handleArchiveRequest}
             showHistory={showHistory} setShowHistory={setShowHistory}
             currentUser={currentUser} myLocation={myLocation}
+            equipment={equipment} taskTypes={taskTypes}
           />
         )}
       </div>
@@ -700,6 +778,13 @@ export default function OrchardApp() {
           message={`Delete task "${confirmDelJob.taskName}"?`}
           onConfirm={doDeleteJob}
           onCancel={() => setConfirmDelJob(null)}
+        />
+      )}
+      {confirmArchiveJob && (
+        <ConfirmDialog
+          message={`Archive completed task "${confirmArchiveJob.taskName}"? It will stay in records for reporting.`}
+          onConfirm={doArchiveJob}
+          onCancel={() => setConfirmArchiveJob(null)}
         />
       )}
     </div>
@@ -1180,20 +1265,112 @@ function ItemEditor({ item, icons, title, onSave, onCancel }) {
   );
 }
 
-function RequesterView({ jobs, onNewJob, onDelete }) {
+function RequesterView({ jobs, onNewJob, onDelete, onEdit, equipment, taskTypes, myLocation }) {
+  const [editingJob, setEditingJob] = useState(null);
+
   return (
     <div>
       <button onClick={onNewJob} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 mb-6">
         <Plus size={24} /> New Task Request
       </button>
-      <JobSection title="Waiting" jobs={jobs.filter(j => j.status === 'open')} onDelete={onDelete} showDelete />
+      <JobSection title="Waiting" jobs={jobs.filter(j => j.status === 'open')} onDelete={onDelete} onEdit={(job) => setEditingJob(job)} showDelete showEdit />
       <JobSection title="In Progress" jobs={jobs.filter(j => j.status === 'claimed')} />
       <JobSection title="Completed" jobs={jobs.filter(j => j.status === 'completed').slice(0, 5)} />
+
+      {editingJob && (
+        <EditJobModal
+          job={editingJob}
+          equipment={equipment}
+          taskTypes={taskTypes}
+          myLocation={myLocation}
+          onSave={async (updates) => {
+            await onEdit(editingJob.id, updates);
+            setEditingJob(null);
+          }}
+          onCancel={() => setEditingJob(null)}
+        />
+      )}
     </div>
   );
 }
 
-function JobSection({ title, jobs, onDelete, showDelete }) {
+function EditJobModal({ job, equipment, taskTypes, myLocation, onSave, onCancel }) {
+  const [equip, setEquip] = useState(equipment.find(e => e.id === job.equipmentId) || equipment[0]);
+  const [task, setTask] = useState(taskTypes.find(t => t.id === job.taskId) || taskTypes[0]);
+  const [location, setLocation] = useState({ lat: job.lat, lng: job.lng });
+  const [adjLocation, setAdjLocation] = useState(null);
+  const [note, setNote] = useState(job.note || '');
+
+  const recapture = () => {
+    navigator.geolocation?.getCurrentPosition(
+      p => { setLocation({ lat: p.coords.latitude, lng: p.coords.longitude }); setAdjLocation(null); },
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const finalLoc = adjLocation || location;
+
+  const handleSave = () => {
+    onSave({
+      equipmentId: equip.id,
+      equipmentName: equip.name,
+      equipmentIcon: equip.icon,
+      taskId: task.id,
+      taskName: task.name,
+      taskIcon: task.icon,
+      lat: finalLoc.lat,
+      lng: finalLoc.lng,
+      note,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-end sm:items-center justify-center">
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between z-10">
+          <h2 className="font-bold text-lg">Edit Task</h2>
+          <button onClick={onCancel} className="text-gray-400 text-2xl leading-none">×</button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Equipment</label>
+            <select value={equip.id} onChange={e => setEquip(equipment.find(x => x.id === e.target.value))}
+              className="w-full border border-gray-300 rounded-lg p-3 bg-white">
+              {equipment.map(e => <option key={e.id} value={e.id}>{e.icon} {e.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Task type</label>
+            <select value={task.id} onChange={e => setTask(taskTypes.find(x => x.id === e.target.value))}
+              className="w-full border border-gray-300 rounded-lg p-3 bg-white">
+              {taskTypes.map(t => <option key={t.id} value={t.id}>{t.icon} {t.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Location</label>
+            <div className="bg-gray-50 rounded p-2 text-xs mb-2 flex items-center gap-2">
+              <MapPin size={12} className="text-red-600" />{finalLoc.lat.toFixed(6)}, {finalLoc.lng.toFixed(6)}
+            </div>
+            <PinAdjuster initialLat={location.lat} initialLng={location.lng} onChange={(lat, lng) => setAdjLocation({ lat, lng })} />
+            <button onClick={recapture} className="w-full text-sm text-blue-600 py-2 mt-1">🔄 Re-capture GPS</button>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Note</label>
+            <textarea value={note} onChange={e => setNote(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg p-3 text-sm h-20" />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onCancel} className="flex-1 py-2 border border-gray-300 rounded-lg text-gray-700">Cancel</button>
+            <button onClick={handleSave} className="flex-1 py-3 bg-green-700 text-white rounded-lg font-bold">Save changes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobSection({ title, jobs, onDelete, onEdit, onArchive, showDelete, showEdit, showArchive }) {
   if (!jobs.length) return null;
   return (
     <div className="mb-4">
@@ -1212,12 +1389,19 @@ function JobSection({ title, jobs, onDelete, showDelete }) {
                 <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                   <Clock size={12} /> {formatTime(job.createdAt)}
                   {job.claimedByName && <span className="ml-1">· {job.claimedByName}</span>}
+                  {job.editHistory?.length > 0 && <span className="ml-1 italic">· edited</span>}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 <StatusBadge status={job.status} />
+                {showEdit && onEdit && (
+                  <button onClick={() => onEdit(job)} className="text-gray-400 hover:text-blue-600 p-1" title="Edit"><Edit2 size={16} /></button>
+                )}
                 {showDelete && onDelete && (
-                  <button onClick={() => onDelete(job.id)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16} /></button>
+                  <button onClick={() => onDelete(job.id)} className="text-gray-400 hover:text-red-500 p-1" title="Delete"><Trash2 size={16} /></button>
+                )}
+                {showArchive && onArchive && (
+                  <button onClick={() => onArchive(job.id)} className="text-gray-400 hover:text-red-500 p-1" title="Archive"><Trash2 size={16} /></button>
                 )}
               </div>
             </div>
@@ -1228,13 +1412,26 @@ function JobSection({ title, jobs, onDelete, showDelete }) {
   );
 }
 
-function FulfillerView({ activeJobs, completedJobs, openJobs, view, setView, onClaim, onComplete, showHistory, setShowHistory, currentUser, myLocation }) {
-  const myClaimedJobs = activeJobs.filter(j => j.status === 'claimed' && j.claimedBy === currentUser.id);
-  const othersClaimedJobs = activeJobs.filter(j => j.status === 'claimed' && j.claimedBy !== currentUser.id);
+function FulfillerView({ activeJobs, completedJobs, openJobs, view, setView, onClaim, onComplete, onArchive, showHistory, setShowHistory, currentUser, myLocation, equipment, taskTypes }) {
+  const [equipFilter, setEquipFilter] = useState('all');
+  const [taskFilter, setTaskFilter] = useState('all');
+
+  // Apply filters
+  const filterFn = (j) =>
+    (equipFilter === 'all' || j.equipmentId === equipFilter) &&
+    (taskFilter === 'all' || j.taskId === taskFilter);
+
+  const filteredActive = activeJobs.filter(filterFn);
+  const filteredCompleted = completedJobs.filter(filterFn);
+  const filteredOpen = filteredActive.filter(j => j.status === 'open');
+  const myClaimedJobs = filteredActive.filter(j => j.status === 'claimed' && j.claimedBy === currentUser.id);
+  const othersClaimedJobs = filteredActive.filter(j => j.status === 'claimed' && j.claimedBy !== currentUser.id);
+
+  const hasFilter = equipFilter !== 'all' || taskFilter !== 'all';
 
   return (
     <div>
-      <div className="flex gap-2 mb-4 bg-white rounded-lg p-1 shadow-sm">
+      <div className="flex gap-2 mb-3 bg-white rounded-lg p-1 shadow-sm">
         <button onClick={() => setView('list')}
           className={`flex-1 py-2 rounded-md flex items-center justify-center gap-2 font-medium ${view === 'list' ? 'bg-green-700 text-white' : 'text-gray-600'}`}>
           <List size={18} />List
@@ -1245,30 +1442,57 @@ function FulfillerView({ activeJobs, completedJobs, openJobs, view, setView, onC
         </button>
       </div>
 
-      {openJobs.length > 0 && (
+      {/* Filters */}
+      <div className="bg-white rounded-lg p-3 shadow-sm mb-4">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center justify-between">
+          <span>Filters</span>
+          {hasFilter && (
+            <button onClick={() => { setEquipFilter('all'); setTaskFilter('all'); }}
+              className="text-blue-600 normal-case font-medium">Clear all</button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <select value={equipFilter} onChange={e => setEquipFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white">
+            <option value="all">All equipment</option>
+            {equipment.map(e => (
+              <option key={e.id} value={e.id}>{e.icon} {e.name}</option>
+            ))}
+          </select>
+          <select value={taskFilter} onChange={e => setTaskFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white">
+            <option value="all">All task types</option>
+            {taskTypes.map(t => (
+              <option key={t.id} value={t.id}>{t.icon} {t.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {filteredOpen.length > 0 && (
         <div className="bg-orange-100 border-l-4 border-orange-500 p-3 mb-4 rounded-r-lg flex items-center gap-2">
           <AlertCircle size={20} className="text-orange-600" />
-          <span className="font-semibold text-orange-900">{openJobs.length} open {openJobs.length === 1 ? 'task' : 'tasks'} waiting</span>
+          <span className="font-semibold text-orange-900">{filteredOpen.length} open {filteredOpen.length === 1 ? 'task' : 'tasks'}{hasFilter ? ' (filtered)' : ' waiting'}</span>
         </div>
       )}
 
       {view === 'list' ? (
         <div className="space-y-4">
-          <ActionableSection title="🆕 Open tasks" jobs={openJobs} actionLabel="Claim Task" onAction={onClaim} color="bg-green-600 hover:bg-green-700" />
+          <ActionableSection title="🆕 Open tasks" jobs={filteredOpen} actionLabel="Claim Task" onAction={onClaim} color="bg-green-600 hover:bg-green-700" />
           <ActionableSection title="👷 My claimed tasks" jobs={myClaimedJobs} actionLabel="Mark Complete" onAction={onComplete} color="bg-blue-600 hover:bg-blue-700" />
           <JobSection title="Claimed by others" jobs={othersClaimedJobs} />
           <button onClick={() => setShowHistory(!showHistory)} className="w-full text-center text-sm text-gray-600 underline py-2">
-            {showHistory ? 'Hide' : 'Show'} completed history ({completedJobs.length})
+            {showHistory ? 'Hide' : 'Show'} completed history ({filteredCompleted.length})
           </button>
-          {showHistory && <JobSection title="Completed" jobs={completedJobs} />}
+          {showHistory && <JobSection title="Completed" jobs={filteredCompleted} onArchive={onArchive} showArchive />}
         </div>
       ) : (
         <div>
-          <CanvasMap jobs={activeJobs} myLocation={myLocation} currentUser={currentUser} onClaim={onClaim} onComplete={onComplete} height={480} />
+          <CanvasMap jobs={filteredActive} myLocation={myLocation} currentUser={currentUser} onClaim={onClaim} onComplete={onComplete} height={480} />
           <div className="flex gap-4 justify-center text-xs mt-2 text-gray-600">
             <span>🔴 Open</span><span>🔵 Mine</span><span>⚫ Others</span><span>🔵● You</span>
           </div>
-          {activeJobs.length === 0 && <div className="text-center text-sm text-gray-500 mt-2">No active tasks on map</div>}
+          {filteredActive.length === 0 && <div className="text-center text-sm text-gray-500 mt-2">No active tasks{hasFilter ? ' match your filters' : ''}</div>}
         </div>
       )}
     </div>
