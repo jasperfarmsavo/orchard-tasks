@@ -496,26 +496,34 @@ export default function OrchardApp() {
   // Subscribe to jobs (real-time) and trigger notifications on changes
   const prevJobsRef = useRef([]);
   const currentUserRef = useRef(null);
+  const myLocationRef = useRef(null);
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
+  useEffect(() => { myLocationRef.current = myLocation; }, [myLocation]);
 
   useEffect(() => {
     const unsub = subscribeCollection('jobs', (newJobs) => {
       const cu = currentUserRef.current;
+      const loc = myLocationRef.current;
       if (cu && prevJobsRef.current.length > 0) {
         const prevIds = new Set(prevJobsRef.current.map(j => j.id));
         const prevById = Object.fromEntries(prevJobsRef.current.map(j => [j.id, j]));
 
+        // Fulfiller: new OPEN task appeared — only notify if logged in as fulfiller AND on-site
         if (cu.role === 'fulfiller') {
-          const newOpen = newJobs.filter(j => j.status === 'open' && !prevIds.has(j.id));
-          newOpen.forEach(j => {
-            playNotificationSound();
-            vibrate();
-            showBrowserNotification('🆕 New task', `${j.taskIcon} ${j.taskName} · ${j.equipmentName}`);
-            setNotification({ msg: `🆕 New task: ${j.taskName} (${j.equipmentName})`, type: 'info' });
-            setTimeout(() => setNotification(null), 5000);
-          });
+          const onSite = loc ? isNearAnyOrchard(loc.lat, loc.lng) : false;
+          if (onSite) {
+            const newOpen = newJobs.filter(j => j.status === 'open' && !prevIds.has(j.id) && !j.archived);
+            newOpen.forEach(j => {
+              playNotificationSound();
+              vibrate();
+              showBrowserNotification('🆕 New task', `${j.taskIcon} ${j.taskName} · ${j.equipmentName}`);
+              setNotification({ msg: `🆕 New task: ${j.taskName} (${j.equipmentName})`, type: 'info' });
+              setTimeout(() => setNotification(null), 5000);
+            });
+          }
         }
 
+        // Requester: my task was marked completed
         if (cu.role === 'requester') {
           newJobs.forEach(j => {
             const prev = prevById[j.id];
@@ -562,15 +570,25 @@ export default function OrchardApp() {
   }, [authed]);
 
   useEffect(() => {
-    if (navigator.geolocation) {
+    if (!navigator.geolocation) {
+      setMyLocation({ lat: -33.64, lng: 115.45 });
+      return;
+    }
+    // Initial fix
+    navigator.geolocation.getCurrentPosition(
+      p => setMyLocation({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => setMyLocation({ lat: -33.64, lng: 115.45 }),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+    // Refresh every 2 min so on-site detection stays current
+    const id = setInterval(() => {
       navigator.geolocation.getCurrentPosition(
         p => setMyLocation({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        () => setMyLocation({ lat: -33.64, lng: 115.45 }),
+        () => {},
         { enableHighAccuracy: true, timeout: 8000 }
       );
-    } else {
-      setMyLocation({ lat: -33.64, lng: 115.45 });
-    }
+    }, 120000);
+    return () => clearInterval(id);
   }, []);
 
   const showNotif = (msg, type = 'success') => {
@@ -731,6 +749,11 @@ export default function OrchardApp() {
         </div>
       )}
 
+      {/* Fulfiller notification status indicator */}
+      {currentUser.role === 'fulfiller' && (
+        <FulfillerNotifBanner myLocation={myLocation} />
+      )}
+
       {notification && (
         <div className={`fixed top-20 left-4 right-4 z-50 p-3 rounded-lg shadow-lg text-white text-center font-medium ${
           notification.type === 'success' ? 'bg-green-600' :
@@ -787,6 +810,42 @@ export default function OrchardApp() {
           onCancel={() => setConfirmArchiveJob(null)}
         />
       )}
+    </div>
+  );
+}
+
+function FulfillerNotifBanner({ myLocation }) {
+  const [permission, setPermission] = useState(typeof Notification !== 'undefined' ? Notification.permission : 'default');
+  const onSite = myLocation ? isNearAnyOrchard(myLocation.lat, myLocation.lng) : false;
+
+  const askPermission = async () => {
+    const granted = await requestNotificationPermission();
+    setPermission(granted ? 'granted' : Notification.permission);
+  };
+
+  if (permission !== 'granted') {
+    return (
+      <div className="bg-yellow-50 border-l-4 border-yellow-500 mx-4 mt-3 p-3 rounded-r-lg flex items-center gap-2 text-sm">
+        <span>🔕</span>
+        <span className="flex-1 text-yellow-900">Notifications are off. Tap to enable so you don't miss new tasks.</span>
+        <button onClick={askPermission} className="bg-yellow-600 text-white px-3 py-1 rounded-md font-semibold text-xs">Enable</button>
+      </div>
+    );
+  }
+
+  if (!onSite) {
+    return (
+      <div className="bg-gray-50 border-l-4 border-gray-400 mx-4 mt-3 p-3 rounded-r-lg flex items-center gap-2 text-sm text-gray-700">
+        <span>📍</span>
+        <span>Notifications paused — you're off-site (more than 5km from any orchard)</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-green-50 border-l-4 border-green-500 mx-4 mt-3 p-3 rounded-r-lg flex items-center gap-2 text-sm text-green-800">
+      <span>🔔</span>
+      <span>You'll be notified when new tasks come in</span>
     </div>
   );
 }
